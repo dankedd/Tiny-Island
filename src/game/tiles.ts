@@ -1,18 +1,18 @@
 import type { TileType } from './types';
 
 export interface TileInfo {
-  naam: string;
-  icoon: string;
-  kleur: string;
-  uitleg: string;
+  name: string;
+  icon: string;
+  color: string;
+  info: string;
 }
 
 export const TILES: Record<TileType, TileInfo> = {
-  akker:   { naam: 'Akker',       icoon: '🌾', kleur: '#d9b54a', uitleg: '1 voedsel per nacht, +1 voor elk huis ernaast (max +2).' },
-  bos:     { naam: 'Bos',         icoon: '🌲', kleur: '#3f8f4f', uitleg: '1 hout per nacht, +1 als er 2 of meer bossen naast liggen.' },
-  huis:    { naam: 'Huis',        icoon: '🏠', kleur: '#e9967a', uitleg: '2 bewoners per niveau. Elke bewoner eet 1 voedsel per nacht.' },
-  steen:   { naam: 'Steengroeve', icoon: '⛏️', kleur: '#8d8f94', uitleg: '1 steen per nacht.' },
-  steiger: { naam: 'Steiger',     icoon: '⚓', kleur: '#6fa8c9', uitleg: '1 voedsel per zeevak ernaast (max 3). Hiermee kun je vissen.' },
-  toren:   { naam: 'Wachttoren',  icoon: '🗼', kleur: '#8a78c0', uitleg: '3 verdediging per niveau tegen stormnachten.' },
-  ruine:   { naam: 'Ruïne',       icoon: '🏚️', kleur: '#5d5a55', uitleg: 'Verlaten. Herbouw tot huis voor 2 hout.' },
+  field:  { name: 'Field',  icon: '🌾', color: '#d9b54a', info: 'Makes 1 food each night. +1 for each house next to it (up to +2).' },
+  forest: { name: 'Forest', icon: '🌲', color: '#3f8f4f', info: 'Makes 1 wood each night. +1 when it touches 2 other forests.' },
+  house:  { name: 'House',  icon: '🏠', color: '#e9967a', info: 'Home for 2 people per level. Each person eats 1 food each night.' },
+  quarry: { name: 'Quarry', icon: '⛏️', color: '#8d8f94', info: 'Makes 1 stone each night.' },
+  dock:   { name: 'Dock',   icon: '⚓', color: '#6fa8c9', info: 'Makes 1 food for each water spot next to it (up to 3). Lets you go fishing!' },
+  tower:  { name: 'Tower', icon: '🗼', color: '#8a78c0', info: 'Gives 3 defence per level against the Fog Pirates.' },
+  ruin:   { name: 'Ruin',   icon: '🏚️', color: '#5d5a55', info: 'Broken. Fix it into a house for 2 wood.' },
 };

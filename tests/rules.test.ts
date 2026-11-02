@@ -13,22 +13,22 @@ describe('rules', () => {
 
   it('only allows placing next to land', () => {
     const s = newGame(seq(0.1));
-    expect(canPlace(s, 0, 1, 'bos')).toBe(true);
-    expect(canPlace(s, 3, 0, 'bos')).toBe(false);
-    expect(canPlace(s, 0, 0, 'bos')).toBe(false);
+    expect(canPlace(s, 0, 1, 'forest')).toBe(true);
+    expect(canPlace(s, 3, 0, 'forest')).toBe(false);
+    expect(canPlace(s, 0, 0, 'forest')).toBe(false);
   });
 
   it('gives a field a bonus for neighbouring houses', () => {
     const s = newGame(seq(0.1));
-    expect(yieldOf(s, 1, 0, 'akker', 1)).toEqual({ voedsel: 2 });
+    expect(yieldOf(s, 1, 0, 'field', 1)).toEqual({ food: 2 });
   });
 
   it('upgrades a tile when you can pay', () => {
     const s = newGame(seq(0.1));
-    s.res.hout = 3; s.res.steen = 2;
+    s.res.wood = 3; s.res.stone = 2;
     expect(upgrade(s, '0,0')).toBe(true);
     expect(s.tiles['0,0'].l).toBe(2);
-    expect(s.res.hout).toBe(0);
+    expect(s.res.wood).toBe(0);
     expect(upgrade(s, '0,0')).toBe(false);
   });
 
@@ -36,16 +36,16 @@ describe('rules', () => {
     const s = newGame(seq(0.1));
     s.turn = CONFIG.turnsPerDay - 1;
     const rep = place(s, 0, 0, 1, seq(0.1));
-    expect(rep?.title).toBe('Nacht 1');
+    expect(rep?.title).toBe('Night 1');
     expect(s.day).toBe(2);
   });
 
   it('hurts the island when a storm beats the defence', () => {
     const s = newGame(seq(0.1));
-    s.day = 2; s.res.hout = 10;
+    s.day = 2; s.res.wood = 10;
     const rep = nightfall(s, seq(0));
     expect(rep.isStorm).toBe(true);
-    expect(Object.values(s.tiles).some(t => t.t === 'ruine')).toBe(true);
+    expect(Object.values(s.tiles).some(t => t.t === 'ruin')).toBe(true);
   });
 
   it('ends the game after the last day', () => {
@@ -58,7 +58,7 @@ describe('rules', () => {
 
   it('pays out a pearl for a perfect catch', () => {
     const s = newGame(seq(0.1));
-    s.tiles['0,1'] = { t: 'steiger', l: 1 };
+    s.tiles['0,1'] = { t: 'dock', l: 1 };
     expect(resolveFish(s, 0.5).pearls).toBe(1);
     expect(s.fished).toBe(true);
   });

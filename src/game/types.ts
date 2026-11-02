@@ -1,6 +1,6 @@
-export type TileType = 'akker' | 'bos' | 'huis' | 'steen' | 'steiger' | 'toren' | 'ruine';
-export type PlaceableType = Exclude<TileType, 'ruine'>;
-export type ResourceKey = 'voedsel' | 'hout' | 'steen' | 'parels';
+export type TileType = 'field' | 'forest' | 'house' | 'quarry' | 'dock' | 'tower' | 'ruin';
+export type PlaceableType = Exclude<TileType, 'ruin'>;
+export type ResourceKey = 'food' | 'wood' | 'stone' | 'pearls';
 export type Resources = Record<ResourceKey, number>;
 export type Cost = Partial<Resources>;
 

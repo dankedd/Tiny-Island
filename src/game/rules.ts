@@ -3,12 +3,12 @@ import { inGrid, key, neighbours, parse } from './hex';
 import type { Cost, GameState, NightReport, PlaceableType, Resources, Rng, Tile, TileType } from './types';
 import { TILES } from './tiles';
 
-const RES_KEYS = ['voedsel', 'hout', 'steen', 'parels'] as const;
+const RES_KEYS = ['food', 'wood', 'stone', 'pearls'] as const;
 
 export function newGame(rng: Rng = Math.random): GameState {
   return {
     version: 1,
-    tiles: { '0,0': { t: 'huis', l: 1 }, '1,0': { t: 'akker', l: 1 }, '-1,1': { t: 'bos', l: 1 } },
+    tiles: { '0,0': { t: 'house', l: 1 }, '1,0': { t: 'field', l: 1 }, '-1,1': { t: 'forest', l: 1 } },
     res: { ...CONFIG.startResources },
     turn: 0,
     day: 1,
@@ -45,10 +45,10 @@ export const neighboursOfType = (s: GameState, q: number, r: number, t: TileType
 
 export function yieldOf(s: GameState, q: number, r: number, t: TileType, l: number): Partial<Resources> {
   switch (t) {
-    case 'akker': return { voedsel: (1 + Math.min(2, neighboursOfType(s, q, r, 'huis'))) * l };
-    case 'bos': return { hout: (1 + (neighboursOfType(s, q, r, 'bos') >= 2 ? 1 : 0)) * l };
-    case 'steen': return { steen: l };
-    case 'steiger': return { voedsel: Math.min(3, seaCount(s, q, r)) * l };
+    case 'field': return { food: (1 + Math.min(2, neighboursOfType(s, q, r, 'house'))) * l };
+    case 'forest': return { wood: (1 + (neighboursOfType(s, q, r, 'forest') >= 2 ? 1 : 0)) * l };
+    case 'quarry': return { stone: l };
+    case 'dock': return { food: Math.min(3, seaCount(s, q, r)) * l };
     default: return {};
   }
 }
@@ -56,17 +56,17 @@ export function yieldOf(s: GameState, q: number, r: number, t: TileType, l: numb
 export function totals(s: GameState): { pop: number; def: number } {
   let pop = 0, def = 0;
   for (const v of Object.values(s.tiles)) {
-    if (v.t === 'huis') pop += CONFIG.popPerHouseLevel * v.l;
-    if (v.t === 'toren') def += CONFIG.defencePerTowerLevel * v.l;
+    if (v.t === 'house') pop += CONFIG.popPerHouseLevel * v.l;
+    if (v.t === 'tower') def += CONFIG.defencePerTowerLevel * v.l;
   }
   return { pop, def };
 }
 
 export function score(s: GameState): number {
   const { pop } = totals(s);
-  const levels = Object.values(s.tiles).reduce((a, v) => a + (v.t === 'ruine' ? 0 : v.l), 0);
+  const levels = Object.values(s.tiles).reduce((a, v) => a + (v.t === 'ruin' ? 0 : v.l), 0);
   const c = CONFIG.score;
-  return pop * c.perResident + s.res.parels * c.perPearl + levels * c.perTileLevel;
+  return pop * c.perResident + s.res.pearls * c.perPearl + levels * c.perTileLevel;
 }
 
 export const isStormNight = (day: number): boolean => day % CONFIG.stormEvery === 0;
@@ -75,12 +75,12 @@ export const stormPower = (s: GameState): number => CONFIG.stormBase + CONFIG.st
 export function canPlace(s: GameState, q: number, r: number, t: PlaceableType): boolean {
   if (s.over || !inGrid(q, r, CONFIG.gridRadius) || tileAt(s, q, r)) return false;
   if (!neighbours(q, r).some(([a, b]) => tileAt(s, a, b))) return false;
-  if (t === 'steiger' && seaCount(s, q, r) < 1) return false;
+  if (t === 'dock' && seaCount(s, q, r) < 1) return false;
   return true;
 }
 
 export function upgradeCost(v: Tile): Cost | null {
-  if (v.t === 'ruine') return { ...CONFIG.rebuildCost };
+  if (v.t === 'ruin') return { ...CONFIG.rebuildCost };
   if (v.l === 1) return { ...CONFIG.upgradeCost[2] };
   if (v.l === 2) return { ...CONFIG.upgradeCost[3] };
   return null;
@@ -91,7 +91,7 @@ export const canPay = (s: GameState, c: Cost): boolean =>
 /** Places the offer at index `i` on (q, r). Returns a night report when this turn ended the day. */
 export function place(s: GameState, i: number, q: number, r: number, rng: Rng = Math.random): NightReport | null {
   const t = s.offers[i];
-  if (!t || !canPlace(s, q, r, t)) throw new Error('Ongeldige zet');
+  if (!t || !canPlace(s, q, r, t)) throw new Error('Invalid move');
   s.tiles[key(q, r)] = { t, l: 1 };
   s.turn++;
   s.offers = drawOffers(rng);
@@ -104,12 +104,12 @@ export function upgrade(s: GameState, k: string): boolean {
   const c = upgradeCost(v);
   if (!c || !canPay(s, c)) return false;
   for (const [n, amount] of Object.entries(c) as [keyof Resources, number][]) s.res[n] -= amount;
-  if (v.t === 'ruine') { v.t = 'huis'; v.l = 1; } else v.l++;
+  if (v.t === 'ruin') { v.t = 'house'; v.l = 1; } else v.l++;
   return true;
 }
 
 export const formatYield = (y: Partial<Resources>): string =>
-  RES_KEYS.filter(k => y[k]).map(k => `+${y[k]} ${k}`).join(', ') || 'geen opbrengst';
+  RES_KEYS.filter(k => y[k]).map(k => `+${y[k]} ${k}`).join(', ') || 'nothing';
 
 export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
   const lines: string[] = [];
@@ -119,22 +119,22 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
     const y = yieldOf(s, a, b, v.t, v.l);
     for (const n of RES_KEYS) s.res[n] += y[n] ?? 0;
   }
-  lines.push(`Je eiland leverde ${formatYield({ voedsel: s.res.voedsel - before.voedsel, hout: s.res.hout - before.hout, steen: s.res.steen - before.steen })} op.`);
+  lines.push(`Your island made ${formatYield({ food: s.res.food - before.food, wood: s.res.wood - before.wood, stone: s.res.stone - before.stone })}.`);
 
   const { pop, def } = totals(s);
   const need = pop * CONFIG.foodPerResident;
-  const ate = Math.min(need, s.res.voedsel);
-  s.res.voedsel -= ate;
-  lines.push(`Je ${pop} bewoners aten ${ate} voedsel.`);
+  const ate = Math.min(need, s.res.food);
+  s.res.food -= ate;
+  lines.push(`Your ${pop} people ate ${ate} food.`);
   const short = need - ate;
   if (short > 0) {
-    const houses = Object.values(s.tiles).filter(v => v.t === 'huis');
+    const houses = Object.values(s.tiles).filter(v => v.t === 'house');
     const leave = Math.ceil(short / 2);
     for (let i = 0; i < leave && houses.length; i++) {
       const v = houses.splice(Math.floor(rng() * houses.length), 1)[0];
-      if (v.l > 1) v.l--; else { v.t = 'ruine'; v.l = 1; }
+      if (v.l > 1) v.l--; else { v.t = 'ruin'; v.l = 1; }
     }
-    lines.push(`Er was ${short} voedsel te weinig. ${leave} ${leave === 1 ? 'huis raakte' : 'huizen raakten'} bewoners kwijt.`);
+    lines.push(`Not enough food! ${short} people were hungry, so ${leave} ${leave === 1 ? 'family' : 'families'} moved away.`);
   }
 
   const storm = isStormNight(s.day);
@@ -142,28 +142,28 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
     const p = stormPower(s);
     s.storms++;
     if (def >= p) {
-      s.res.parels += 1; s.res.steen += 3;
-      lines.push(`De Nevelrovers (kracht ${p}) botsten op je verdediging (${def}). Buit: 1 parel en 3 steen.`);
+      s.res.pearls += 1; s.res.stone += 3;
+      lines.push(`The Fog Pirates came (strength ${p}), but your towers (${def}) chased them away! You found 1 pearl and 3 stone.`);
     } else {
       const loss = p - def;
-      const lh = Math.min(s.res.hout, loss);
-      const ls = Math.min(s.res.steen, Math.ceil(loss / 2));
-      s.res.hout -= lh; s.res.steen -= ls;
+      const lh = Math.min(s.res.wood, loss);
+      const ls = Math.min(s.res.stone, Math.ceil(loss / 2));
+      s.res.wood -= lh; s.res.stone -= ls;
       const coast = Object.entries(s.tiles).filter(([k, v]) => {
         const [a, b] = parse(k);
-        return v.t !== 'toren' && v.t !== 'ruine' && seaCount(s, a, b) > 0;
+        return v.t !== 'tower' && v.t !== 'ruin' && seaCount(s, a, b) > 0;
       });
       let hit = '';
       if (coast.length) {
         const v = coast[Math.floor(rng() * coast.length)][1];
-        hit = ` Ze plunderden ook je ${TILES[v.t].naam.toLowerCase()}, nu een ruïne.`;
-        v.t = 'ruine'; v.l = 1;
+        hit = ` They also broke your ${TILES[v.t].name.toLowerCase()}. You can rebuild it.`;
+        v.t = 'ruin'; v.l = 1;
       }
-      lines.push(`De Nevelrovers (kracht ${p}) waren sterker dan je verdediging (${def}). Ze namen ${lh} hout en ${ls} steen mee.${hit}`);
+      lines.push(`The Fog Pirates (strength ${p}) were too strong for your towers (${def}). They took ${lh} wood and ${ls} stone.${hit}`);
     }
   }
 
-  const title = `${storm ? 'Stormnacht' : 'Nacht'} ${s.day}`;
+  const title = `${storm ? 'Pirate night' : 'Night'} ${s.day}`;
   s.fished = false;
   if (s.day >= CONFIG.days) {
     s.over = true;
@@ -176,7 +176,7 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
 export type FishResult = { kind: 'perfect' | 'good' | 'miss'; food: number; pearls: number };
 
 export function bestDockLevel(s: GameState): number {
-  return Math.max(0, ...Object.values(s.tiles).filter(v => v.t === 'steiger').map(v => v.l));
+  return Math.max(0, ...Object.values(s.tiles).filter(v => v.t === 'dock').map(v => v.l));
 }
 export const canFish = (s: GameState): boolean => !s.over && !s.fished && bestDockLevel(s) > 0;
 
@@ -188,8 +188,8 @@ export function resolveFish(s: GameState, rel: number): FishResult {
   if (rel >= f.perfectFrom && rel <= f.perfectTo) res = { kind: 'perfect', food: 4 + 2 * lvl, pearls: 1 };
   else if (rel >= 0 && rel <= 1) res = { kind: 'good', food: 3 + 2 * lvl, pearls: 0 };
   else res = { kind: 'miss', food: 1, pearls: 0 };
-  s.res.voedsel += res.food;
-  s.res.parels += res.pearls;
+  s.res.food += res.food;
+  s.res.pearls += res.pearls;
   s.fished = true;
   return res;
 }

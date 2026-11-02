@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'nl.eilandrijk.app',
-  appName: 'Eilandrijk',
+  appId: 'com.tinyisland.game',
+  appName: 'Tiny Island',
   webDir: 'dist',
   ios: { contentInset: 'never' },
 };
