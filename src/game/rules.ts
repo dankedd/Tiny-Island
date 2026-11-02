@@ -42,7 +42,7 @@ export function makeIsland(seed: number): Record<string, Terrain> {
     const wob = (ang: number) => waves.reduce((sum, w) => sum + Math.sin(ang * w.k + w.p) * w.a, 0);
     // Direction from the island's middle to the town square.
     const th = rng() * Math.PI * 2;
-    const d = R + wob(th) - 2.6;
+    const d = R + wob(th) - CONFIG.coastFromStart;
     const cx = -Math.cos(th) * d, cy = -Math.sin(th) * d; // in hex units, x right, y down
     const [cq, cr] = roundHex(cx - cy / Math.sqrt(3), (2 / Math.sqrt(3)) * cy);
     const t: Record<string, Terrain> = {};
@@ -56,7 +56,7 @@ export function makeIsland(seed: number): Record<string, Terrain> {
     // The town square and the tiles around it must be land, and the sea must be close.
     const around = [[0, 0] as const, ...neighbours(0, 0)];
     if (around.some(([q, r]) => t[key(q, r)] !== 'grass')) continue;
-    if (!Object.keys(t).some(k => t[k] === 'sea' && distance(...parse(k)) <= 3)) continue;
+    if (!Object.keys(t).some(k => t[k] === 'sea' && distance(...parse(k)) <= 4)) continue;
     finishIsland(t, rng);
     return t;
   }
@@ -98,8 +98,8 @@ function finishIsland(t: Record<string, Terrain>, rng: Rng): void {
       growFrom(kind, free[Math.floor(rng() * free.length)], size[0] + Math.floor(rng() * (size[1] - size[0] + 1)));
     }
   };
-  grow('forest', 8, [3, 7]);
-  grow('rocks', 6, [2, 4]);
+  grow('forest', 16, [3, 7]);
+  grow('rocks', 11, [2, 4]);
 }
 
 /** Splits the land into cloud areas: area 0 around the town square, the rest in chunks. */
@@ -145,6 +145,7 @@ export function newGame(seed = Math.floor(Math.random() * 1e9)): GameState {
     terrain,
     region: makeRegions(terrain, seed),
     open: [0],
+    explorers: {},
     mission: 0,
     unlocked: ['road', 'lumber'],
     stats: { won: 0, cleared: 0 },
@@ -308,10 +309,19 @@ export function buyBoat(s: GameState, k: string, boat: BoatType, rng: Rng = Math
 
 // ---------- clouds and clearing ----------
 
-export function exploreCost(s: GameState): Cost {
-  const n = s.open.length - 1;
-  const { base, step } = CONFIG.explore;
-  return { food: base.food + step.food * n, wood: base.wood + step.wood * n };
+/** How many explorers the next cloud area needs. */
+export function exploreNeed(s: GameState): number {
+  return CONFIG.explore.base + CONFIG.explore.step * (s.open.length - 1);
+}
+/** People who have no job right now. Only they can go exploring. */
+export function freePeople(s: GameState): number {
+  const e = economy(s);
+  return Math.max(0, e.people - e.jobs);
+}
+/** How many explorers would go on the next trip into the area under `k`. */
+export function explorersToSend(s: GameState, k: string): number {
+  const left = exploreNeed(s) - (s.explorers[s.region[k]] ?? 0);
+  return Math.max(0, Math.min(freePeople(s), left, Math.floor(s.res.food / CONFIG.explore.foodPerExplorer)));
 }
 
 /** Why the cloud area under `k` cannot be explored now, or null when it can. */
@@ -322,17 +332,23 @@ export function exploreProblem(s: GameState, k: string): string | null {
   const touches = Object.keys(s.region).some(c => s.region[c] === id && nbKeys(c).some(n => n in s.region && isOpen(s, n)));
   if (!touches) return 'Explore the land next to it first.';
   if (s.actions >= CONFIG.actionsPerDay) return 'No more building today.';
-  const c = exploreCost(s);
-  if (!canPay(s, c)) return `You need ${costText(c)} for the explorers.`;
+  if (freePeople(s) === 0) return 'Everyone is busy working. Build more houses so people are free to explore.';
+  if (s.res.food < CONFIG.explore.foodPerExplorer) return 'Explorers need food for the trip.';
   return null;
 }
 
-/** Sends explorers into the clouds: the whole area opens up. */
+/**
+ * Sends your free people into the clouds. Each explorer takes some food.
+ * When enough explorers have gone, the whole area opens up.
+ */
 export function explore(s: GameState, k: string, rng: Rng = Math.random): NightReport | null {
   const p = exploreProblem(s, k);
   if (p) throw new Error(p);
-  pay(s, exploreCost(s));
-  s.open.push(s.region[k]);
+  const id = s.region[k];
+  const n = explorersToSend(s, k);
+  s.res.food -= n * CONFIG.explore.foodPerExplorer;
+  s.explorers[id] = (s.explorers[id] ?? 0) + n;
+  if (s.explorers[id] >= exploreNeed(s)) s.open.push(id);
   return useAction(s, rng);
 }
 

@@ -3,9 +3,11 @@ import type { BoatType, BuildableType, Cost, PirateShip } from './types';
 /** All balance numbers in one place, so tuning never means hunting through code. */
 export const CONFIG = {
   /** Size of the whole island, in tiles from its middle. You start near its coast. */
-  islandRadius: 7.6,
+  islandRadius: 10.5,
+  /** How far the coast is from the town square, in tiles. */
+  coastFromStart: 3.6,
   /** Tiles around the town square that are not in the clouds at the start. */
-  startRadius: 3,
+  startRadius: 6,
   /** How many cloud areas the rest of the island is split into. */
   cloudAreas: 8,
   actionsPerDay: 6,
@@ -50,7 +52,7 @@ export const CONFIG = {
   ] as { ships: PirateShip[]; power: number }[],
   pirateNames: { raft: 'raft', sloop: 'sloop', brig: 'brig', galleon: 'galleon' } as Record<PirateShip, string>,
   /** Exploring a cloud area costs more each time. */
-  explore: { base: { food: 2, wood: 3 }, step: { food: 1, wood: 2 } },
+  explore: { base: 6, step: 3, foodPerExplorer: 1 },
   /** Clearing a tile: what it costs and what you get back. */
   clear: {
     forest: { cost: { food: 1 }, gain: { wood: 2 } },

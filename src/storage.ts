@@ -9,7 +9,7 @@ export async function loadGame(): Promise<GameState | null> {
     const { value } = await Preferences.get({ key: SAVE });
     if (!value) return null;
     const s = JSON.parse(value) as GameState;
-    return s && s.version === 3 && s.b && s.terrain && s.res ? s : null;
+    return s && s.version === 3 && s.b && s.terrain && s.res && s.explorers ? s : null;
   } catch {
     return null;
   }

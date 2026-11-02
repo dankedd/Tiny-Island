@@ -26,6 +26,8 @@ export interface GameState {
   region: Record<string, number>;
   /** Areas that are out of the clouds. */
   open: number[];
+  /** Explorers sent so far into each cloud area. */
+  explorers: Record<number, number>;
   /** Missions done so far (index of the current mission). */
   mission: number;
   /** Buildings you may build. More are unlocked by missions. */

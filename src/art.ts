@@ -231,8 +231,10 @@ export function cloudLayer(
       g.puffs += `<circle cx="${cx.toFixed(1)}" cy="${(cy + r * 0.25).toFixed(1)}" r="${r.toFixed(1)}" class="cl-mid"/><circle cx="${(cx - r * 0.15).toFixed(1)}" cy="${(cy - r * 0.08).toFixed(1)}" r="${(r * 0.82).toFixed(1)}" class="cl-top"/>`;
     }
   }
-  return [...groups].map(([id, g]) =>
-    `<g class="cloud-area${id === leaving ? ' leaving' : ''}" style="animation-delay:-${(id * 1.7).toFixed(1)}s"><g class="cl-shade">${g.shade}</g><g class="cl-base">${g.base}</g>${g.puffs}</g>`).join('');
+  // All shadows go underneath first, so neighbouring areas join up without seams.
+  const shades = [...groups].filter(([id]) => id !== leaving).map(([, g]) => g.shade).join('');
+  return `<g class="cl-shade">${shades}</g>` + [...groups].map(([id, g]) =>
+    `<g class="cloud-area${id === leaving ? ' leaving' : ''}" style="animation-delay:-${(id * 1.7).toFixed(1)}s">${id === leaving ? `<g class="cl-shade">${g.shade}</g>` : ''}<g class="cl-base">${g.base}</g>${g.puffs}</g>`).join('');
 }
 
 // ---------- paths ----------

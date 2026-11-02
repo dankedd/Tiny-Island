@@ -8,7 +8,7 @@ import { CONFIG } from './game/config';
 import { DIRS, key, neighbours, parse, toPixel as hexToPixel } from './game/hex';
 import {
   boatProblem, build, buildCost, buyBoat, canFish, canPay, economy, fishZone, fleetText, formatYield, isStormNight,
-  clearProblem, clearTile, explore, exploreCost, exploreProblem, isOpen,
+  clearProblem, clearTile, explore, exploreNeed, exploreProblem, explorersToSend, freePeople, isOpen,
   network, newGame, nextPirateNight, pirateFleet, placeProblem, resolveFish, score, sleep, stormPower,
   terrainAt, upgrade, upgradeCost, upgradeProblem,
 } from './game/rules';
@@ -37,6 +37,7 @@ let justUpgraded: string | null = null;
 let busy = false;
 let built = '';
 let cloudsLeaving: number | null = null;
+let lastDecor = '', lastClouds = '';
 const cam = { x: 0, y: 0, z: 1 };
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -123,7 +124,7 @@ function gameScreen(): void {
   wireSoundButtons();
   tool = pending = sel = null; hint = ''; busy = false;
   drawWaves();
-  terrainDirty = true;
+  terrainDirty = true; lastDecor = ''; lastClouds = '';
   setupCamera();
   render();
   if (G.over) showEnd(['This island is finished.']);
@@ -161,18 +162,38 @@ function applyCamera(): void {
   const svg = document.getElementById('svg');
   if (!svg) return;
   const w = svg.clientWidth || 360, h = svg.clientHeight || 400;
-  const lim = WORLD();
-  cam.x = Math.max(-lim, Math.min(lim, cam.x));
-  cam.y = Math.max(-lim, Math.min(lim, cam.y));
+  // You can only look as far as the edge of the clouds.
+  const b = openBounds();
+  const halfW = (w * cam.z) / 2, halfH = (h * cam.z) / 2;
+  const clamp = (v: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
+  cam.x = clamp(cam.x, b.x0 + halfW, b.x1 - halfW);
+  cam.y = clamp(cam.y, b.y0 + halfH, b.y1 - halfH);
   svg.setAttribute('viewBox', `${cam.x - (w * cam.z) / 2} ${cam.y - (h * cam.z) / 2} ${w * cam.z} ${h * cam.z}`);
 }
 function zoomBy(f: number): void {
   const svg = $('svg');
   const minZ = (S * Math.sqrt(3) * 4.5) / (svg.clientWidth || 360);
-  const maxZ = (WORLD() * 2.3) / (svg.clientWidth || 360);
+  const b = openBounds();
+  const maxZ = Math.max(minZ, Math.min((b.x1 - b.x0) / (svg.clientWidth || 360), (b.y1 - b.y0) / (svg.clientHeight || 400)));
   cam.z = Math.max(minZ, Math.min(maxZ, cam.z * f));
   applyCamera();
 }
+/** The open land plus a strip of cloud around it: the part of the world you can look at. */
+let boundsCache: { key: string; b: { x0: number; x1: number; y0: number; y1: number } } | null = null;
+function openBounds() {
+  const k = G.open.join(',');
+  if (boundsCache?.key === k) return boundsCache.b;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const c of Object.keys(G.region)) {
+    if (!isOpen(G, c)) continue;
+    const { x, y } = px(c);
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  const m = S * 3.2;
+  boundsCache = { key: k, b: { x0: x0 - m, x1: x1 + m, y0: y0 - m, y1: y1 + m } };
+  return boundsCache.b;
+}
+
 function homeCamera(): void {
   const svg = $('svg');
   cam.x = 0; cam.y = 0;
@@ -291,10 +312,19 @@ function missionDone(done: Mission[]): Promise<void> {
 
 async function doExplore(k: string): Promise<void> {
   if (busy) return;
+  const id = G.region[k];
+  const sent = explorersToSend(G, k);
   const rep = explore(G, k);
-  play('upgrade'); tap(true);
-  sel = null;
-  cloudsLeaving = G.region[k];
+  tap(true);
+  if (G.open.includes(id)) {
+    play('upgrade');
+    sel = null;
+    cloudsLeaving = id;
+    built = `The clouds are gone! Your ${sent} explorers found new land.`;
+  } else {
+    play('select');
+    hint = '';
+  }
   await afterAction(rep);
 }
 
@@ -472,8 +502,10 @@ function render(): void {
 
   // Paths and buildings
   if (terrainDirty) { $('terrain').innerHTML = terrainLayer(G.terrain, px); terrainDirty = false; }
-  $('decor').innerHTML = decorLayer(G.terrain, new Set(Object.keys(G.b)), px);
-  $('clouds').innerHTML = cloudLayer(G.terrain, G.region, G.open, px, cloudsLeaving);
+  const decorKey = Object.keys(G.b).sort().join(';') + '|' + G.stats.cleared;
+  if (decorKey !== lastDecor) { $('decor').innerHTML = decorLayer(G.terrain, new Set(Object.keys(G.b)), px); lastDecor = decorKey; }
+  const cloudKey = G.open.join(',') + '|' + cloudsLeaving;
+  if (cloudKey !== lastClouds) { $('clouds').innerHTML = cloudLayer(G.terrain, G.region, G.open, px, cloudsLeaving); lastClouds = cloudKey; }
   cloudsLeaving = null;
   $('paths').innerHTML = pathLayer(G.b, nbKeys, px, network(G));
   // Flat fields first, then everything else from back to front.
@@ -554,8 +586,11 @@ function renderPanel(e: ReturnType<typeof economy>): void {
       // Clouds: send explorers.
       if (!isOpen(G, k)) {
         const p = exploreProblem(G, k);
-        info.innerHTML = `<b>Clouds</b>: Nobody knows what is under here. Send explorers to open up this land. ${p ? `<span class="warn-text">${esc(p)}</span>` : ''}`;
-        tools.innerHTML = `<div class="actions"><button class="btn" id="aExplore"${p ? ' disabled' : ''}>🧭 Explore ${costHtml(exploreCost(G))}</button><button class="btn ghost" id="aClose" style="margin-left:auto">Close</button></div>`;
+        const need = exploreNeed(G), have = G.explorers[G.region[k]] ?? 0, n = explorersToSend(G, k);
+        info.innerHTML = `<b>Clouds</b>: Nobody knows what is under here. Send <b>${need}</b> explorers to clear the clouds. People without a job can go, and each one takes ${CONFIG.explore.foodPerExplorer} food.
+          <div class="explore-bar"><div style="width:${Math.min(100, (have / need) * 100)}%"></div><span>${have} / ${need} explorers</span></div>
+          ${p ? `<span class="warn-text">${esc(p)}</span>` : `<span class="muted">${freePeople(G)} free ${freePeople(G) === 1 ? 'person' : 'people'} now.</span>`}`;
+        tools.innerHTML = `<div class="actions"><button class="btn" id="aExplore"${p ? ' disabled' : ''}>🧭 Send ${n || ''} explorer${n === 1 ? '' : 's'} ${n ? costHtml({ food: n * CONFIG.explore.foodPerExplorer }) : ''}</button><button class="btn ghost" id="aClose" style="margin-left:auto">Close</button></div>`;
         $('aExplore').onclick = () => void doExplore(k);
         $('aClose').onclick = () => { play('tap'); sel = null; render(); };
         return;

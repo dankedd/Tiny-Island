@@ -47,10 +47,12 @@ describe('start', () => {
     for (let seed = 1; seed <= 30; seed++) {
       const s = newGame(seed);
       const land = Object.keys(s.terrain).filter(k => s.terrain[k] !== 'sea');
-      expect(land.length, `seed ${seed}`).toBeGreaterThan(120);
-      expect(Object.keys(s.terrain).some(k => s.terrain[k] === 'sea' && distance(...parse(k)) <= 3), `seed ${seed}`).toBe(true);
+      expect(land.length, `seed ${seed}`).toBeGreaterThan(250);
+      expect(Object.keys(s.terrain).some(k => s.terrain[k] === 'sea' && distance(...parse(k)) <= 4), `seed ${seed}`).toBe(true);
       expect(new Set(Object.values(s.region)).size, `seed ${seed}`).toBe(CONFIG.cloudAreas + 1);
-      expect(land.filter(k => isOpen(s, k)).length).toBeLessThan(land.length / 3);
+      const open = land.filter(k => isOpen(s, k)).length;
+      expect(open, `seed ${seed}`).toBeGreaterThan(60);
+      expect(open).toBeLessThan(land.length / 2);
     }
   });
 
@@ -200,7 +202,7 @@ describe('economy', () => {
 });
 
 describe('clouds and clearing', () => {
-  it('opens a cloud area next to open land, for a price that grows', () => {
+  it('opens a cloud area once enough free people have gone exploring', () => {
     const s = newGame(3);
     s.res = { food: 50, wood: 50, stone: 50, pearls: 0 };
     const cloudy = Object.keys(s.region).filter(k => !isOpen(s, k));
@@ -209,10 +211,23 @@ describe('clouds and clearing', () => {
     expect(near).toBeDefined();
     expect(far).toBeDefined();
     expect(placeProblem(s, near, 'road')).toMatch(/clouds/);
+    // The town square has 4 people and no jobs yet: all 4 go, but the area needs more.
+    explore(s, near);
+    expect(s.explorers[s.region[near]]).toBe(4);
+    expect(s.res.food).toBe(46);
+    expect(isOpen(s, near)).toBe(false);
     explore(s, near);
     expect(isOpen(s, near)).toBe(true);
-    expect(s.res.wood).toBe(50 - CONFIG.explore.base.wood);
-    expect(s.actions).toBe(1);
+    expect(s.explorers[s.region[near]]).toBe(CONFIG.explore.base);
+  });
+
+  it('needs free people to explore', () => {
+    const s = flat();
+    s.open = [0];
+    s.terrain['2,0'] = 'forest'; s.terrain['-2,0'] = 'rocks';
+    build(s, '1,0', 'farm'); build(s, '0,1', 'farm');
+    const near = Object.keys(s.region).find(k => !isOpen(s, k) && !exploreProblem(s, k)?.match(/next to/))!;
+    expect(exploreProblem(s, near)).toMatch(/busy/);
   });
 
   it('chops forests and breaks rocks into grass, giving wood and stone', () => {
