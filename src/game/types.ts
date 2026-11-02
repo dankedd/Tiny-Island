@@ -25,6 +25,10 @@ export interface NightReport {
   title: string;
   lines: string[];
   isStorm: boolean;
+  /** Only set on storm nights: did the defence hold? */
+  stormWon?: boolean;
+  /** What each tile produced this night, for the floating numbers on the board. */
+  yields: { k: string; y: Partial<Resources> }[];
   gameOver: boolean;
 }
 

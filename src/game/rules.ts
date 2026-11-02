@@ -114,9 +114,11 @@ export const formatYield = (y: Partial<Resources>): string =>
 export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
   const lines: string[] = [];
   const before = { ...s.res };
+  const yields: NightReport['yields'] = [];
   for (const [k, v] of Object.entries(s.tiles)) {
     const [a, b] = parse(k);
     const y = yieldOf(s, a, b, v.t, v.l);
+    if (Object.values(y).some(n => n)) yields.push({ k, y });
     for (const n of RES_KEYS) s.res[n] += y[n] ?? 0;
   }
   lines.push(`Your island made ${formatYield({ food: s.res.food - before.food, wood: s.res.wood - before.wood, stone: s.res.stone - before.stone })}.`);
@@ -138,10 +140,12 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
   }
 
   const storm = isStormNight(s.day);
+  let stormWon: boolean | undefined;
   if (storm) {
     const p = stormPower(s);
     s.storms++;
-    if (def >= p) {
+    stormWon = def >= p;
+    if (stormWon) {
       s.res.pearls += 1; s.res.stone += 3;
       lines.push(`The Fog Pirates came (strength ${p}), but your towers (${def}) chased them away! You found 1 pearl and 3 stone.`);
     } else {
@@ -167,10 +171,10 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
   s.fished = false;
   if (s.day >= CONFIG.days) {
     s.over = true;
-    return { title, lines, isStorm: storm, gameOver: true };
+    return { title, lines, isStorm: storm, stormWon, yields, gameOver: true };
   }
   s.day++;
-  return { title, lines, isStorm: storm, gameOver: false };
+  return { title, lines, isStorm: storm, stormWon, yields, gameOver: false };
 }
 
 export type FishResult = { kind: 'perfect' | 'good' | 'miss'; food: number; pearls: number };

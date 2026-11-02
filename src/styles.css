@@ -109,3 +109,82 @@ body { margin: 0; }
 .start .stack { display: grid; gap: 10px; width: min(260px, 80vw); }
 .start .btn { font-size: 1.05rem; padding: 12px; }
 .howto ul { font-size: .88rem; }
+
+/* ---------- graphics pass ---------- */
+.top-right { display: flex; align-items: center; gap: 8px; }
+.sound-row { display: flex; gap: 8px; justify-content: center; }
+.small-row { gap: 4px; }
+.icon-btn {
+  font-size: 1.05rem; width: 36px; height: 36px; border-radius: 50%; border: 0; cursor: pointer;
+  background: rgba(233,244,242,.12); color: var(--foam); display: grid; place-items: center; padding: 0;
+}
+.icon-btn s { text-decoration-thickness: 2px; opacity: .6; }
+.hud { display: grid; gap: 6px; }
+.r .i { height: 20px; display: grid; place-items: center; }
+.r .i svg { width: 20px; height: 20px; }
+.r.flash .v { animation: bump .5s ease-out; }
+@keyframes bump { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
+.muted { color: var(--muted); }
+
+.card { padding: 4px 4px 6px; }
+.card .ci { width: 52px; height: 52px; display: block; }
+.card .ci svg { width: 100%; height: 100%; display: block; }
+.card.on .ci { animation: hover 1.2s ease-in-out infinite; }
+@keyframes hover { 50% { transform: translateY(-3px); } }
+
+.board svg .cell { cursor: pointer; }
+.hex-sea { fill: rgba(233,244,242,.035); stroke: rgba(233,244,242,.08); }
+.hex-hit { fill: transparent; }
+.hex-valid { fill: rgba(255,201,74,.18); stroke: var(--sun); stroke-width: 2; stroke-dasharray: 5 4; animation: glowspot 1.4s ease-in-out infinite; }
+@keyframes glowspot { 50% { fill: rgba(255,201,74,.34); } }
+.ghost { opacity: .65; }
+.sel-ring { fill: none; stroke: var(--sun); stroke-width: 3.5; filter: drop-shadow(0 0 4px rgba(255,201,74,.8)); pointer-events: none; }
+
+.tile { transform-box: fill-box; transform-origin: 50% 70%; }
+.tile.drop { animation: drop .45s cubic-bezier(.25,1.6,.5,1); }
+@keyframes drop { 0% { transform: translateY(-28px) scale(.7); opacity: 0; } 60% { opacity: 1; } 100% { transform: none; } }
+.tile.pulse { animation: pulse .6s ease-out; }
+@keyframes pulse { 0% { transform: scale(1); } 35% { transform: scale(1.18); filter: brightness(1.35); } 100% { transform: scale(1); } }
+
+.waves .wave { fill: none; stroke: rgba(233,244,242,.16); stroke-width: 2; stroke-linecap: round; animation: drift 7s ease-in-out infinite alternate; }
+.waves .w1 { animation-duration: 9s; animation-delay: -3s; stroke: rgba(233,244,242,.11); }
+.waves .w2 { animation-duration: 11s; animation-delay: -6s; }
+@keyframes drift { from { transform: translateX(-14px); opacity: .4; } to { transform: translateX(14px); opacity: 1; } }
+
+.spin { animation: spin 4s linear infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes spin { to { transform: translate(0,-5px) rotate(360deg); } }
+.bob { animation: bob 2.4s ease-in-out infinite; }
+@keyframes bob { 50% { translate: 0 1.5px; rotate: 3deg; } }
+.glow { animation: glow 1.8s ease-in-out infinite; }
+@keyframes glow { 50% { fill: #fff6c4; filter: drop-shadow(0 0 5px #ffe27a); } }
+.shine { animation: glow 2.4s ease-in-out infinite; }
+.flag { animation: flag 1s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: left center; }
+@keyframes flag { to { transform: scaleX(.75); } }
+
+.nightveil { fill: #061a2e; opacity: .5; animation: dusk 1s ease-out; pointer-events: none; }
+@keyframes dusk { from { opacity: 0; } }
+.hud, .panel { transition: opacity .8s; }
+.is-night .hud, .is-night .panel { opacity: .55; }
+.float { font: 800 13px var(--font-body); fill: #fff; stroke: rgba(0,0,0,.45); stroke-width: 3px; paint-order: stroke; text-anchor: middle; animation: floatup 1.4s ease-out forwards; pointer-events: none; }
+@keyframes floatup { 0% { transform: translateY(6px); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(-22px); opacity: 0; } }
+.ship { pointer-events: none; }
+.boom { fill: #ffd34d; animation: boom .5s ease-out forwards; transform-box: fill-box; transform-origin: center; pointer-events: none; }
+@keyframes boom { 0% { transform: scale(.2); opacity: 1; } 100% { transform: scale(3); opacity: 0; } }
+
+.start .hero { width: min(320px, 85vw); height: auto; overflow: visible; }
+.start .best { color: var(--sand); }
+.hero .waves path { animation: drift 6s ease-in-out infinite alternate; }
+
+.moon { font-size: 2.4rem; line-height: 1; text-align: center; }
+.modal h2 { text-align: center; }
+.catch { font-size: 3rem; text-align: center; animation: drop .5s cubic-bezier(.25,1.6,.5,1); }
+.pond { position: relative; height: 70px; border-radius: 14px; background: linear-gradient(#5fb3cf, #2b7189); overflow: hidden; }
+.pond .ripple { position: absolute; left: 50%; top: 50%; width: 30px; height: 10px; margin: -5px 0 0 -15px; border: 2px solid rgba(255,255,255,.6); border-radius: 50%; animation: ripple 1.6s ease-out infinite; }
+@keyframes ripple { to { transform: scale(3); opacity: 0; } }
+.pond .bobber { position: absolute; left: 50%; top: 50%; width: 12px; height: 16px; margin: -12px 0 0 -6px; border-radius: 6px 6px 7px 7px; background: linear-gradient(#e0604f 50%, #fff 50%); animation: bob 1.2s ease-in-out infinite; }
+.pond .fishy { position: absolute; top: 34px; left: -30px; font-size: 1.4rem; animation: swim 3.5s linear infinite; }
+@keyframes swim { to { transform: translateX(380px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .waves .wave, .spin, .bob, .glow, .shine, .flag, .hex-valid, .card.on .ci, .pond * { animation: none !important; }
+}

@@ -19,6 +19,9 @@ npm test           # test the game rules
 | `src/main.ts` | Screens: start menu, board, night and fishing pop-ups. |
 | `src/storage.ts` | Saves the game and best score (works on iPhone and in the browser). |
 | `ios/` | The Xcode project for iPhone. |
+| `src/art.ts` | All tile pictures, drawn as SVG in code. |
+| `src/audio.ts` | All sounds and music, made live with Web Audio (no sound files needed). |
+| `assets/` | App icon source (`icon.svg`) and the 1024px PNG. |
 | `tests/` | Tests for the game rules. |
 
 ## Build the iPhone app (on a Mac)
