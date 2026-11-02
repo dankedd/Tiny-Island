@@ -5,18 +5,21 @@ import '@fontsource/nunito/700.css';
 import '@fontsource/nunito/800.css';
 import './styles.css';
 import { CONFIG } from './game/config';
-import { DIRS, distance, key, neighbours, parse, toPixel as hexToPixel } from './game/hex';
+import { DIRS, key, neighbours, parse, toPixel as hexToPixel } from './game/hex';
 import {
   boatProblem, build, buildCost, buyBoat, canFish, canPay, economy, fishZone, fleetText, formatYield, isStormNight,
-  network, newGame, nextPirateNight, pirateFleet, placeProblem, resolveFish, score, sleep, startGoal, stormPower,
+  clearProblem, clearTile, explore, exploreCost, exploreProblem, isOpen,
+  network, newGame, nextPirateNight, pirateFleet, placeProblem, resolveFish, score, sleep, stormPower,
   terrainAt, upgrade, upgradeCost, upgradeProblem,
 } from './game/rules';
 import { BUILDINGS, BUILD_MENU, TERRAIN_INFO } from './game/tiles';
 import { GAME_NAME } from './game/brand';
 import type { BoatType, BuildableType, Cost, GameState, NightReport, Resources } from './game/types';
 import { tap } from './feedback';
+import { MISSIONS, checkMissions, currentMission, type Mission } from './game/missions';
+import { comic } from './comic';
 import { loadBest, loadGame, saveBest, saveGame } from './storage';
-import { ICONS, S, boatSvg, buildingSvg, decorLayer, heroIsland, hexPoints, menuIcon, pathLayer, pirateShip, terrainLayer } from './art';
+import { ICONS, S, boatSvg, buildingSvg, cloudLayer, decorLayer, heroIsland, hexPoints, menuIcon, pathLayer, pirateShip, terrainLayer } from './art';
 import { musicOn, play, soundOn, toggleMusic, toggleSfx, unlockAudio } from './audio';
 
 const root = document.getElementById('app')!;
@@ -33,6 +36,7 @@ let justBuilt: string | null = null;
 let justUpgraded: string | null = null;
 let busy = false;
 let built = '';
+let cloudsLeaving: number | null = null;
 const cam = { x: 0, y: 0, z: 1 };
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -81,15 +85,15 @@ function refreshSoundButtons(): void {
 
 function howTo(): void {
   modal(`<h2>How to play</h2><div class="howto"><ul>
+    <li>Follow the missions at the top. Each mission gives a reward and unlocks new buildings.</li>
     <li>Start with a lumber camp next to a forest and a quarry next to rocks. They give you wood and stone.</li>
-    <li>Pick something from the build menu and tap a green spot. Everything costs wood, stone or food.</li>
     <li>Build paths from your town square. Buildings only work when a path leads to them.</li>
     <li>Houses give you people. People work in farms, lumber camps, quarries and docks.</li>
-    <li>Fields only grow food when a farm is close by. One farm looks after 2 fields, more after an upgrade. Fields next to each other join up.</li>
-    <li>Put a lumber camp next to a forest and a quarry next to rocks.</li>
-    <li>A dock goes on the beach. Buy boats there for more fish!</li>
-    <li>You can build ${CONFIG.actionsPerDay} things a day. Then night falls, your island makes things and your people eat.</li>
-    <li>From night ${CONFIG.firstPirateNight} the Fog Pirates come every ${CONFIG.stormEvery} nights. First in small rafts, later in big ships. Towers keep them away.</li>
+    <li>Fields grow food when a farm is close by. Fields next to each other join up.</li>
+    <li>Most of the island is hidden in the clouds. Tap the clouds and send explorers to find new land.</li>
+    <li>Need room? Tap a forest or rocks to chop or break them. You get wood or stone back.</li>
+    <li>You can do ${CONFIG.actionsPerDay} things a day. Then night falls, your island makes things and your people eat.</li>
+    <li>From night ${CONFIG.firstPirateNight} the Fog Pirates come every ${CONFIG.stormEvery} nights, in bigger ships each time. Towers keep them away.</li>
     <li>Drag to look around the island. Pinch or use + and − to zoom.</li>
   </ul></div><button class="btn" id="mOk">Let's play!</button>`);
   $('mOk').onclick = () => { play('tap'); closeModal(); };
@@ -105,10 +109,10 @@ function gameScreen(): void {
           <div class="sound-row small-row">${soundButtons()}</div>
         </div>
       </div>
-      <div class="hud"><div class="res" id="res"></div><div class="banner" id="banner"></div></div>
+      <div class="hud"><div class="res" id="res"></div><div class="mission" id="mission"></div><div class="banner" id="banner"></div></div>
       <div class="board" id="board">
         <svg id="svg" role="img" aria-label="Your island">
-          <g class="waves" id="waves"></g><g id="terrain"></g><g id="decor"></g><g id="paths"></g><g id="overlay"></g><g id="buildings"></g><g id="marks"></g><g id="fx"></g>
+          <g class="waves" id="waves"></g><g id="terrain"></g><g id="decor"></g><g id="paths"></g><g id="overlay"></g><g id="buildings"></g><g id="clouds"></g><g id="marks"></g><g id="fx"></g>
         </svg>
         <div class="zoom"><button class="icon-btn" id="zIn" aria-label="Zoom in">+</button><button class="icon-btn" id="zOut" aria-label="Zoom out">−</button><button class="icon-btn" id="zHome" aria-label="Back to the town square">⌂</button></div>
       </div>
@@ -119,7 +123,7 @@ function gameScreen(): void {
   wireSoundButtons();
   tool = pending = sel = null; hint = ''; busy = false;
   drawWaves();
-  $('terrain').innerHTML = terrainLayer(G.terrain, px);
+  terrainDirty = true;
   setupCamera();
   render();
   if (G.over) showEnd(['This island is finished.']);
@@ -141,7 +145,17 @@ function closeModal(): void {
 }
 
 // ---------- camera: drag to pan, pinch or buttons to zoom ----------
-const WORLD = () => S * Math.sqrt(3) * (CONFIG.gridRadius + 0.5);
+/** How far the island reaches from the town square, in pixels. */
+const WORLD = () => {
+  let m = 0;
+  for (const k of Object.keys(G.terrain)) {
+    if (G.terrain[k] === 'sea') continue;
+    const { x, y } = px(k);
+    m = Math.max(m, Math.abs(x), Math.abs(y));
+  }
+  return m + S * 3;
+};
+let terrainDirty = true;
 
 function applyCamera(): void {
   const svg = document.getElementById('svg');
@@ -226,7 +240,7 @@ function clientToHex(cx: number, cy: number): string {
 function onBoardTap(cx: number, cy: number): void {
   if (busy || G.over) return;
   const k = clientToHex(cx, cy);
-  if (distance(...parse(k)) > CONFIG.gridRadius) return;
+  if (!(k in G.terrain)) return;
   if (tool) {
     const problem = placeProblem(G, k, tool);
     if (problem) { hint = problem; pending = null; play('error'); render(); return; }
@@ -249,30 +263,63 @@ async function doBuild(k: string): Promise<void> {
   justBuilt = k; pending = null; hint = '';
   if (t !== 'road') {
     tool = null; sel = null; hint = '';
-    const goal = startGoal(G);
-    built = `${BUILDINGS[t].name} built!${goal === 'quarry' ? ' Now build a quarry next to rocks.' : t === 'quarry' && !goal && G.day === 1 ? ' Now you can build anything. Try a farm with fields for food!' : ''}`;
+    built = `${BUILDINGS[t].name} built!`;
   }
+  await afterAction(rep);
+}
+
+/** Every action ends here: check missions, save, draw, and start the night if the day is over. */
+async function afterAction(rep: NightReport | null): Promise<void> {
+  const done = rep ? [] : checkMissions(G);
   void saveGame(G);
   render();
+  if (done.length) await missionDone(done);
   if (rep) await nightSequence(rep);
+}
+
+function missionDone(done: Mission[]): Promise<void> {
+  play('end'); tap(true);
+  const next = currentMission(G);
+  return new Promise(res => {
+    modal(`<div class="moon" aria-hidden="true">⭐</div><h2>Mission complete!</h2>
+      ${done.map(m => `<div class="mission-done"><b>${esc(m.text)}</b>${Object.keys(m.reward).length ? `<div class="reward">Reward: ${costHtml(m.reward, false)}</div>` : ''}${m.done ? `<div>${esc(m.done)}</div>` : ''}</div>`).join('')}
+      ${next ? `<div class="small">Next mission: ${esc(next.text)}</div>` : '<div class="small">You finished every mission. Amazing!</div>'}
+      <button class="btn" id="mOk">Great!</button>`);
+    $('mOk').onclick = () => { play('tap'); closeModal(); res(); };
+  });
+}
+
+async function doExplore(k: string): Promise<void> {
+  if (busy) return;
+  const rep = explore(G, k);
+  play('upgrade'); tap(true);
+  sel = null;
+  cloudsLeaving = G.region[k];
+  await afterAction(rep);
+}
+
+async function doClear(k: string): Promise<void> {
+  if (busy) return;
+  const was = terrainAt(G, k);
+  const rep = clearTile(G, k);
+  play(was === 'forest' ? 'place' : 'error'); tap(true);
+  terrainDirty = true;
+  sel = null;
+  await afterAction(rep);
 }
 
 async function doUpgrade(k: string): Promise<void> {
   const rep = upgrade(G, k);
   play('upgrade'); tap(true);
   justUpgraded = k;
-  void saveGame(G);
-  render();
-  if (rep) await nightSequence(rep);
+  await afterAction(rep);
 }
 
 async function doBoat(k: string, b: BoatType): Promise<void> {
   const rep = buyBoat(G, k, b);
   play('catch'); tap(true);
   justUpgraded = k;
-  void saveGame(G);
-  render();
-  if (rep) await nightSequence(rep);
+  await afterAction(rep);
 }
 
 async function doSleep(): Promise<void> {
@@ -304,7 +351,7 @@ async function nightSequence(rep: NightReport): Promise<void> {
   await wait(fast ? 600 : 1400 + rep.yields.length * 80);
 
   if (rep.isStorm) {
-    play('pirates');
+    await comic(rep, G.day - (rep.gameOver ? 0 : 1));
     const far = WORLD() * 0.95;
     const near = S * Math.sqrt(3) * 4.2;
     const ships = rep.ships ?? ['sloop'];
@@ -323,17 +370,18 @@ async function nightSequence(rep: NightReport): Promise<void> {
       });
     }
     await wait(fast ? 600 : 2300);
-    play(rep.stormWon ? 'victory' : 'defeat');
   }
 
   busy = false;
   if (rep.gameOver) { play('end'); showEnd(rep.lines, rep.title); return; }
+  const done = checkMissions(G);
+  void saveGame(G);
   const pn = nextPirateNight(G.day);
   const next = isStormNight(G.day)
     ? `Watch out! The Fog Pirates come tonight with ${fleetText(pirateFleet(G).ships)} (strength ${stormPower(G)}).`
     : pn ? `Tonight the sea will be calm. Pirates come on night ${pn}.` : 'Tonight the sea will be calm.';
   modal(`<div class="moon" aria-hidden="true">${rep.isStorm ? '🏴‍☠️' : '🌙'}</div><h2>${rep.title}</h2><ul>${rep.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><div class="small">${next}</div><button class="btn" id="mOk">Start day ${G.day}</button>`);
-  $('mOk').onclick = () => { play('select'); closeModal(); };
+  $('mOk').onclick = () => { play('select'); closeModal(); if (done.length) void missionDone(done); };
 }
 
 function showEnd(lines: string[], title = `Your island after ${CONFIG.days} days`): void {
@@ -395,8 +443,8 @@ function drawWaves(): void {
   $('waves').innerHTML = w;
 }
 
-const costHtml = (c: Cost) => (Object.entries(c) as [keyof Resources, number][])
-  .map(([k, n]) => `<span class="cost${G.res[k] < n ? ' short' : ''}">${n}<i>${ICONS[k]}</i></span>`).join('');
+const costHtml = (c: Cost, check = true) => (Object.entries(c) as [keyof Resources, number][])
+  .map(([k, n]) => `<span class="cost${check && G.res[k] < n ? ' short' : ''}">${check ? '' : '+'}${n}<i>${ICONS[k]}</i></span>`).join('');
 
 function render(): void {
   const e = economy(G);
@@ -411,18 +459,22 @@ function render(): void {
   $('dots').innerHTML = Array.from({ length: CONFIG.actionsPerDay }, (_, i) => `<div class="dot${i < G.actions ? ' done' : ''}"></div>`).join('');
   const left = CONFIG.actionsPerDay - G.actions;
   const ban = $('banner');
-  const goal = startGoal(G);
   const pn = nextPirateNight(G.day);
-  const warn = goal === 'lumber' ? '🪓 Step 1: lumber camp by a forest'
-    : goal === 'quarry' ? '⛏️ Step 2: quarry by the rocks'
-    : isStormNight(G.day) ? `🏴‍☠️ Tonight: ${fleetText(pirateFleet(G).ships)}, strength ${stormPower(G)} vs your ${e.defence}`
+  const warn = isStormNight(G.day) ? `🏴‍☠️ ${fleetText(pirateFleet(G).ships)} tonight · ${stormPower(G)} vs your ${e.defence}`
     : `🔨 ${left} ${left === 1 ? 'build' : 'builds'} left${pn ? ` · pirates night ${pn}` : ''}`;
-  ban.className = `banner${goal ? ' goal' : isStormNight(G.day) ? ' storm' : ''}`;
+  ban.className = `banner${isStormNight(G.day) ? ' storm' : ''}`;
+  const m = currentMission(G);
+  $('mission').innerHTML = m
+    ? `<span class="mtag">Mission ${G.mission + 1}/${MISSIONS.length}</span> ${esc(m.text)}${m.progress ? ` <b>${m.progress(G)}</b>` : ''}<span class="mreward">${costHtml(m.reward, false)}</span>`
+    : '<span class="mtag">Missions</span> All done! Build the best island you can.';
   ban.innerHTML = `<span>${warn}</span><span class="ban-right">eat ${e.people}🐟 <button class="btn sleep" id="aSleep"${G.over || busy ? ' disabled' : ''}>Sleep 🌙</button></span>`;
   $('aSleep').onclick = () => { play('select'); void doSleep(); };
 
   // Paths and buildings
+  if (terrainDirty) { $('terrain').innerHTML = terrainLayer(G.terrain, px); terrainDirty = false; }
   $('decor').innerHTML = decorLayer(G.terrain, new Set(Object.keys(G.b)), px);
+  $('clouds').innerHTML = cloudLayer(G.terrain, G.region, G.open, px, cloudsLeaving);
+  cloudsLeaving = null;
   $('paths').innerHTML = pathLayer(G.b, nbKeys, px, network(G));
   // Flat fields first, then everything else from back to front.
   const flatFirst = (k: string) => (G.b[k].t === 'field' ? 0 : 1);
@@ -498,7 +550,27 @@ function renderPanel(e: ReturnType<typeof economy>): void {
   if (sel) {
     const v = G.b[sel];
     if (!v) {
-      const T = TERRAIN_INFO[terrainAt(G, sel)];
+      const k = sel;
+      // Clouds: send explorers.
+      if (!isOpen(G, k)) {
+        const p = exploreProblem(G, k);
+        info.innerHTML = `<b>Clouds</b>: Nobody knows what is under here. Send explorers to open up this land. ${p ? `<span class="warn-text">${esc(p)}</span>` : ''}`;
+        tools.innerHTML = `<div class="actions"><button class="btn" id="aExplore"${p ? ' disabled' : ''}>🧭 Explore ${costHtml(exploreCost(G))}</button><button class="btn ghost" id="aClose" style="margin-left:auto">Close</button></div>`;
+        $('aExplore').onclick = () => void doExplore(k);
+        $('aClose').onclick = () => { play('tap'); sel = null; render(); };
+        return;
+      }
+      const ter = terrainAt(G, k);
+      const T = TERRAIN_INFO[ter];
+      if (ter === 'forest' || ter === 'rocks') {
+        const p = clearProblem(G, k);
+        const c = CONFIG.clear[ter];
+        info.innerHTML = `<b>${T.name}</b>: ${T.info} ${ter === 'forest' ? 'Chop it down' : 'Break the rocks'} to make room for buildings. ${p ? `<span class="warn-text">${esc(p)}</span>` : ''}`;
+        tools.innerHTML = `<div class="actions"><button class="btn" id="aClear"${p ? ' disabled' : ''}>${ter === 'forest' ? '🪓 Chop' : '⛏️ Break'} ${costHtml(c.cost)} → ${costHtml(c.gain, false)}</button><button class="btn ghost" id="aClose" style="margin-left:auto">Close</button></div>`;
+        $('aClear').onclick = () => void doClear(k);
+        $('aClose').onclick = () => { play('tap'); sel = null; render(); };
+        return;
+      }
       info.innerHTML = `<b>${T.name}</b>: ${T.info}`;
       tools.innerHTML = buildMenu();
       wireBuildMenu();
@@ -538,12 +610,10 @@ function renderPanel(e: ReturnType<typeof economy>): void {
     return;
   }
 
-  const goal = startGoal(G);
   info.innerHTML = hint ? `<span class="warn-text">${esc(hint)}</span>`
-    : built ? `<b>${built}</b>${goal || G.day === 1 ? '' : ' Pick the next thing to build, or tap a building to upgrade it.'}`
-    : goal === 'lumber' ? 'Welcome! You need <b>wood</b> first. Pick the <b>Lumber camp</b> and put it next to a forest.'
-    : goal === 'quarry' ? 'Now you need <b>stone</b>. Pick the <b>Quarry</b> and put it next to rocks.'
-    : 'Pick something to build, or tap your island to look at it.';
+    : built ? `<b>${built}</b> Pick the next thing to build, or tap a building to upgrade it.`
+    : G.mission === 0 ? 'Welcome! You need <b>wood</b> first. Pick the <b>Lumber camp</b> and put it next to a forest.'
+    : 'Pick something to build, or tap your island. Tap the clouds to explore new land.';
   built = '';
   tools.innerHTML = buildMenu();
   wireBuildMenu();
@@ -565,13 +635,14 @@ function pendingPreview(k: string, t: BuildableType): string {
 }
 
 function buildMenu(): string {
-  const g = startGoal(G);
-  const menu = g ? [g, ...BUILD_MENU.filter(t => t !== g)] : BUILD_MENU;
+  const g = currentMission(G)?.focus;
+  const open = BUILD_MENU.filter(t => G.unlocked.includes(t));
+  const menu = [...(g && open.includes(g) ? [g] : []), ...open.filter(t => t !== g), ...BUILD_MENU.filter(t => !G.unlocked.includes(t))];
   return `<div class="buildbar">${menu.map(t => {
     const c = buildCost(t);
-    const goal = startGoal(G);
-    const ok = canPay(G, c) && (t === 'road' || G.actions < CONFIG.actionsPerDay) && (!goal || t === goal || t === 'road');
-    return `<button class="bmenu${ok ? '' : ' off'}${goal === t ? ' goal' : ''}" data-t="${t}"><span class="bi">${menuIcon(t)}</span><span class="bn">${BUILDINGS[t].name}</span><span class="bc">${costHtml(c)}</span></button>`;
+    const locked = !G.unlocked.includes(t);
+    const ok = !locked && canPay(G, c) && (t === 'road' || G.actions < CONFIG.actionsPerDay);
+    return `<button class="bmenu${ok ? '' : ' off'}${locked ? ' locked' : ''}${g === t && !locked ? ' goal' : ''}" data-t="${t}"><span class="bi">${menuIcon(t)}${locked ? '<span class="lock">🔒</span>' : ''}</span><span class="bn">${BUILDINGS[t].name}</span><span class="bc">${locked ? 'locked' : costHtml(c)}</span></button>`;
   }).join('')}</div>`;
 }
 function wireBuildMenu(): void {
@@ -579,9 +650,9 @@ function wireBuildMenu(): void {
     b.onclick = () => {
       if (busy) return;
       const t = b.dataset.t as BuildableType;
-      const goal = startGoal(G);
-      if (goal && t !== goal && t !== 'road') {
-        hint = goal === 'lumber' ? 'First build a lumber camp next to a forest, so you get wood.' : 'Now build a quarry next to rocks, so you get stone.';
+      if (!G.unlocked.includes(t)) {
+        const by = MISSIONS.findIndex(m => m.unlock?.includes(t));
+        hint = `${BUILDINGS[t].name} is locked. Mission ${by + 1} unlocks it: ${MISSIONS[by]?.text ?? ''}.`;
         play('error'); render(); return;
       }
       tool = t; pending = null; sel = null; hint = '';

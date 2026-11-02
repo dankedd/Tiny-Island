@@ -2,10 +2,14 @@ import type { BoatType, BuildableType, Cost, PirateShip } from './types';
 
 /** All balance numbers in one place, so tuning never means hunting through code. */
 export const CONFIG = {
-  gridRadius: 7,
-  islandRadius: 5.3,
+  /** Size of the whole island, in tiles from its middle. You start near its coast. */
+  islandRadius: 7.6,
+  /** Tiles around the town square that are not in the clouds at the start. */
+  startRadius: 3,
+  /** How many cloud areas the rest of the island is split into. */
+  cloudAreas: 8,
   actionsPerDay: 6,
-  days: 10,
+  days: 15,
   /** The first pirate night, then every `stormEvery` nights after it. */
   firstPirateNight: 4,
   stormEvery: 2,
@@ -41,8 +45,17 @@ export const CONFIG = {
     { ships: ['sloop', 'sloop'], power: 6 },
     { ships: ['brig', 'sloop', 'sloop'], power: 10 },
     { ships: ['galleon', 'brig', 'brig'], power: 14 },
+    { ships: ['galleon', 'galleon', 'brig'], power: 18 },
+    { ships: ['galleon', 'galleon', 'galleon'], power: 22 },
   ] as { ships: PirateShip[]; power: number }[],
   pirateNames: { raft: 'raft', sloop: 'sloop', brig: 'brig', galleon: 'galleon' } as Record<PirateShip, string>,
-  score: { perPerson: 10, perPearl: 15, perLevel: 3, perBoat: 5 },
+  /** Exploring a cloud area costs more each time. */
+  explore: { base: { food: 2, wood: 3 }, step: { food: 1, wood: 2 } },
+  /** Clearing a tile: what it costs and what you get back. */
+  clear: {
+    forest: { cost: { food: 1 }, gain: { wood: 2 } },
+    rocks: { cost: { food: 2, wood: 1 }, gain: { stone: 2 } },
+  },
+  score: { perPerson: 10, perPearl: 15, perLevel: 3, perBoat: 5, perMission: 10, perArea: 8 },
   fishing: { zoneBase: 0.16, zonePerLevel: 0.05, zonePerBoat: 0.02, perfectFrom: 0.4, perfectTo: 0.6 },
 } as const;

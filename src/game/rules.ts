@@ -21,39 +21,55 @@ export function seeded(seed: number): Rng {
   };
 }
 
+/** Turns hex-unit coordinates into the nearest hex. */
+function roundHex(qf: number, rf: number): [number, number] {
+  let q = Math.round(qf), r = Math.round(rf);
+  const sf = -qf - rf, s = Math.round(sf);
+  const dq = Math.abs(q - qf), dr = Math.abs(r - rf), ds = Math.abs(s - sf);
+  if (dq > dr && dq > ds) q = -r - s; else if (dr > ds) r = -q - s;
+  return [q, r];
+}
+
+/**
+ * Makes the island. The town square (0,0) is always close to the coast,
+ * and the island's middle lies further inland, so there is lots to explore.
+ */
 export function makeIsland(seed: number): Record<string, Terrain> {
   const rng = seeded(seed);
-  const R = CONFIG.gridRadius;
-  const waves = Array.from({ length: 3 }, () => ({ k: 1 + rng() * 2, p: rng() * Math.PI * 2, a: 0.4 + rng() * 0.5 }));
-  const t: Record<string, Terrain> = {};
-  for (const [q, r] of gridCells(R)) {
-    const ang = Math.atan2(r * 1.5, Math.sqrt(3) * (q + r / 2));
-    const wobble = waves.reduce((s, w) => s + Math.sin(ang * w.k + w.p) * w.a, 0);
-    const land = CONFIG.islandRadius + wobble - distance(q, r);
-    t[key(q, r)] = distance(q, r) >= R ? 'sea' : land > 0 ? 'grass' : 'sea';
+  const R = CONFIG.islandRadius;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const waves = Array.from({ length: 3 }, () => ({ k: 1 + Math.floor(rng() * 3), p: rng() * Math.PI * 2, a: 0.25 + rng() * 0.45 }));
+    const wob = (ang: number) => waves.reduce((sum, w) => sum + Math.sin(ang * w.k + w.p) * w.a, 0);
+    // Direction from the island's middle to the town square.
+    const th = rng() * Math.PI * 2;
+    const d = R + wob(th) - 2.6;
+    const cx = -Math.cos(th) * d, cy = -Math.sin(th) * d; // in hex units, x right, y down
+    const [cq, cr] = roundHex(cx - cy / Math.sqrt(3), (2 / Math.sqrt(3)) * cy);
+    const t: Record<string, Terrain> = {};
+    const reach = Math.ceil(R + 3);
+    for (const [dq, dr] of gridCells(reach)) {
+      const q = cq + dq, r = cr + dr;
+      const ang = Math.atan2(dr * 1.5, Math.sqrt(3) * (dq + dr / 2));
+      const land = R + wob(ang) - distance(dq, dr);
+      t[key(q, r)] = distance(dq, dr) >= reach - 1 ? 'sea' : land > 0 ? 'grass' : 'sea';
+    }
+    // The town square and the tiles around it must be land, and the sea must be close.
+    const around = [[0, 0] as const, ...neighbours(0, 0)];
+    if (around.some(([q, r]) => t[key(q, r)] !== 'grass')) continue;
+    if (!Object.keys(t).some(k => t[k] === 'sea' && distance(...parse(k)) <= 3)) continue;
+    finishIsland(t, rng);
+    return t;
   }
+  throw new Error('Could not make an island');
+}
+
+function finishIsland(t: Record<string, Terrain>, rng: Rng): void {
   // Coast: land touching the sea becomes beach.
   for (const [k, v] of Object.entries(t)) {
     if (v !== 'grass') continue;
     const [q, r] = parse(k);
     if (neighbours(q, r).some(([a, b]) => (t[key(a, b)] ?? 'sea') === 'sea')) t[k] = 'beach';
   }
-  // Nature: clusters of forest and rocks, keeping the village centre free.
-  const grass = () => Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) >= 2);
-  const grow = (kind: Terrain, clusters: number, size: [number, number]) => {
-    for (let c = 0; c < clusters; c++) {
-      const free = grass();
-      if (!free.length) return;
-      let cur = free[Math.floor(rng() * free.length)];
-      const n = size[0] + Math.floor(rng() * (size[1] - size[0] + 1));
-      for (let i = 0; i < n; i++) {
-        t[cur] = kind;
-        const next = neighbours(...parse(cur)).map(([a, b]) => key(a, b)).filter(k => t[k] === 'grass' && distance(...parse(k)) >= 2);
-        if (!next.length) break;
-        cur = next[Math.floor(rng() * next.length)];
-      }
-    }
-  };
   const growFrom = (kind: Terrain, start: string, n: number) => {
     let cur = start;
     for (let i = 0; i < n; i++) {
@@ -64,28 +80,74 @@ export function makeIsland(seed: number): Record<string, Terrain> {
     }
   };
   // Always a small wood and a few rocks close to the town square, so the first camps fit.
-  const ring = Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) === 2);
+  const ring = Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) === 2).sort();
   if (ring.length) {
     const f = ring[Math.floor(rng() * ring.length)];
     growFrom('forest', f, 3);
-    const far = ring.filter(k => t[k] === 'grass').sort((a, b) => {
-      const [fq, fr] = parse(f);
-      const da = distance(parse(a)[0] - fq, parse(a)[1] - fr), db = distance(parse(b)[0] - fq, parse(b)[1] - fr);
-      return db - da || (a < b ? -1 : 1);
-    });
+    const [fq, fr] = parse(f);
+    const far = ring.filter(k => t[k] === 'grass')
+      .sort((a, b) => distance(parse(b)[0] - fq, parse(b)[1] - fr) - distance(parse(a)[0] - fq, parse(a)[1] - fr) || (a < b ? -1 : 1));
     if (far.length) growFrom('rocks', far[0], 2);
   }
-  grow('forest', 3, [3, 6]);
-  grow('rocks', 2, [2, 3]);
-  return t;
+  // Nature further away: clusters of forest and rocks.
+  const grass = () => Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) >= 3).sort();
+  const grow = (kind: Terrain, clusters: number, size: [number, number]) => {
+    for (let c = 0; c < clusters; c++) {
+      const free = grass();
+      if (!free.length) return;
+      growFrom(kind, free[Math.floor(rng() * free.length)], size[0] + Math.floor(rng() * (size[1] - size[0] + 1)));
+    }
+  };
+  grow('forest', 8, [3, 7]);
+  grow('rocks', 6, [2, 4]);
+}
+
+/** Splits the land into cloud areas: area 0 around the town square, the rest in chunks. */
+export function makeRegions(terrain: Record<string, Terrain>, seed: number): Record<string, number> {
+  const rng = seeded(seed ^ 0x5bd1e995);
+  const land = Object.keys(terrain).filter(k => terrain[k] !== 'sea').sort();
+  const region: Record<string, number> = {};
+  const rest: string[] = [];
+  for (const k of land) {
+    if (distance(...parse(k)) <= CONFIG.startRadius) region[k] = 0; else rest.push(k);
+  }
+  if (!rest.length) return region;
+  // Spread the area centres out: each new one is as far as possible from the others.
+  const centres: [number, number][] = [[0, 0]];
+  const seeds: [number, number][] = [];
+  const far = (k: string) => Math.min(...centres.map(([q, r]) => distance(parse(k)[0] - q, parse(k)[1] - r)));
+  for (let i = 0; i < CONFIG.cloudAreas && i < rest.length; i++) {
+    let best = rest[0], bestD = -1;
+    for (const k of rest) {
+      const dd = far(k) + rng() * 0.5;
+      if (dd > bestD) { bestD = dd; best = k; }
+    }
+    seeds.push(parse(best) as [number, number]);
+    centres.push(parse(best) as [number, number]);
+  }
+  for (const k of rest) {
+    const [q, r] = parse(k);
+    let bi = 0, bd = Infinity;
+    seeds.forEach(([sq, sr], i) => {
+      const dd = distance(q - sq, r - sr);
+      if (dd < bd) { bd = dd; bi = i; }
+    });
+    region[k] = bi + 1;
+  }
+  return region;
 }
 
 export function newGame(seed = Math.floor(Math.random() * 1e9)): GameState {
   const terrain = makeIsland(seed);
   return {
-    version: 2,
+    version: 3,
     seed,
     terrain,
+    region: makeRegions(terrain, seed),
+    open: [0],
+    mission: 0,
+    unlocked: ['road', 'lumber'],
+    stats: { won: 0, cleared: 0 },
     b: { '0,0': { t: 'plaza', l: 1 } },
     res: { ...CONFIG.start },
     day: 1,
@@ -93,19 +155,14 @@ export function newGame(seed = Math.floor(Math.random() * 1e9)): GameState {
     fished: false,
     over: false,
     storms: 0,
-    step: 0,
   };
-}
-
-/** What the player must build first: a lumber camp, then a quarry. Null when building is free. */
-export function startGoal(s: GameState): 'lumber' | 'quarry' | null {
-  const step = s.step ?? 2;
-  return step === 0 ? 'lumber' : step === 1 ? 'quarry' : null;
 }
 
 // ---------- lookups ----------
 
 export const terrainAt = (s: GameState, k: string): Terrain => s.terrain[k] ?? 'sea';
+/** True when this tile is out of the clouds (the sea is always clear). */
+export const isOpen = (s: GameState, k: string): boolean => !(k in s.region) || s.open.includes(s.region[k]);
 const nbKeys = (k: string) => neighbours(...parse(k)).map(([a, b]) => key(a, b));
 const countNb = (s: GameState, k: string, t: Terrain) => nbKeys(k).filter(n => terrainAt(s, n) === t).length;
 
@@ -152,15 +209,11 @@ export const costText = (c: Cost): string =>
 export function placeProblem(s: GameState, k: string, t: BuildableType): string | null {
   if (s.over) return 'The game is over.';
   const ter = terrainAt(s, k);
+  if (!s.unlocked.includes(t)) return 'Finish missions to unlock this.';
   if (s.b[k]) return 'Something is already built here.';
   if (ter === 'sea') return 'You cannot build on the sea.';
-  if (ter === 'forest' || ter === 'rocks') return `You cannot build on ${ter}. Build next to it.`;
-  const goal = startGoal(s);
-  if (goal && t !== goal && t !== 'road') {
-    return goal === 'lumber'
-      ? 'First build a lumber camp next to a forest, so you get wood.'
-      : 'Now build a quarry next to rocks, so you get stone.';
-  }
+  if (!isOpen(s, k)) return 'This land is still in the clouds. Explore it first.';
+  if (ter === 'forest' || ter === 'rocks') return `You cannot build on ${ter}. Build next to it, or clear it first.`;
   const net = network(s);
   const nearFarm = t === 'field' && farmsInReach(s, k, net) > 0;
   if (!touchesNetwork(k, net) && !nearFarm) {
@@ -208,8 +261,6 @@ export function build(s: GameState, k: string, t: BuildableType, rng: Rng = Math
   pay(s, buildCost(t));
   s.b[k] = { t, l: 1 };
   if (t === 'dock') { s.b[k].dir = dockDirection(s, k); s.b[k].boats = []; }
-  const goal = startGoal(s);
-  if (goal && t === goal) s.step = (s.step ?? 0) + 1;
   if (t === 'road') return null;
   return useAction(s, rng);
 }
@@ -252,6 +303,62 @@ export function buyBoat(s: GameState, k: string, boat: BoatType, rng: Rng = Math
   if (p) throw new Error(p);
   pay(s, CONFIG.boats[boat].cost);
   (s.b[k].boats ??= []).push(boat);
+  return useAction(s, rng);
+}
+
+// ---------- clouds and clearing ----------
+
+export function exploreCost(s: GameState): Cost {
+  const n = s.open.length - 1;
+  const { base, step } = CONFIG.explore;
+  return { food: base.food + step.food * n, wood: base.wood + step.wood * n };
+}
+
+/** Why the cloud area under `k` cannot be explored now, or null when it can. */
+export function exploreProblem(s: GameState, k: string): string | null {
+  if (s.over) return 'The game is over.';
+  if (!(k in s.region) || isOpen(s, k)) return 'There are no clouds here.';
+  const id = s.region[k];
+  const touches = Object.keys(s.region).some(c => s.region[c] === id && nbKeys(c).some(n => n in s.region && isOpen(s, n)));
+  if (!touches) return 'Explore the land next to it first.';
+  if (s.actions >= CONFIG.actionsPerDay) return 'No more building today.';
+  const c = exploreCost(s);
+  if (!canPay(s, c)) return `You need ${costText(c)} for the explorers.`;
+  return null;
+}
+
+/** Sends explorers into the clouds: the whole area opens up. */
+export function explore(s: GameState, k: string, rng: Rng = Math.random): NightReport | null {
+  const p = exploreProblem(s, k);
+  if (p) throw new Error(p);
+  pay(s, exploreCost(s));
+  s.open.push(s.region[k]);
+  return useAction(s, rng);
+}
+
+export function clearProblem(s: GameState, k: string): string | null {
+  if (s.over) return 'The game is over.';
+  const ter = terrainAt(s, k);
+  if (ter !== 'forest' && ter !== 'rocks') return 'There is nothing to clear here.';
+  if (!isOpen(s, k)) return 'This land is still in the clouds.';
+  const need = ter === 'forest' ? 'lumber' : 'quarry';
+  if (!Object.values(s.b).some(v => v.t === need)) return ter === 'forest' ? 'Build a lumber camp first, then your woodcutters can chop here.' : 'Build a quarry first, then your diggers can break rocks.';
+  if (!touchesNetwork(k, network(s))) return 'Build a path next to it first.';
+  if (s.actions >= CONFIG.actionsPerDay) return 'No more building today.';
+  const c = CONFIG.clear[ter].cost;
+  if (!canPay(s, c)) return `You need ${costText(c)}.`;
+  return null;
+}
+
+/** Chops a forest or breaks rocks: the tile becomes grass and you keep the wood or stone. */
+export function clearTile(s: GameState, k: string, rng: Rng = Math.random): NightReport | null {
+  const p = clearProblem(s, k);
+  if (p) throw new Error(p);
+  const c = CONFIG.clear[terrainAt(s, k) as 'forest' | 'rocks'];
+  pay(s, c.cost);
+  for (const [n, a] of Object.entries(c.gain) as [keyof Resources, number][]) s.res[n] += a;
+  s.terrain[k] = 'grass';
+  s.stats.cleared++;
   return useAction(s, rng);
 }
 
@@ -329,7 +436,8 @@ export function score(s: GameState): number {
     if (v.t !== 'road' && v.t !== 'plaza' && v.t !== 'ruin') levels += v.l;
     boats += v.boats?.length ?? 0;
   }
-  return e.people * c.perPerson + s.res.pearls * c.perPearl + levels * c.perLevel + boats * c.perBoat;
+  return e.people * c.perPerson + s.res.pearls * c.perPearl + levels * c.perLevel + boats * c.perBoat
+    + s.mission * c.perMission + (s.open.length - 1) * c.perArea;
 }
 
 export const isStormNight = (day: number): boolean =>
@@ -392,6 +500,7 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
     s.storms++;
     stormWon = e.defence >= p;
     if (stormWon) {
+      s.stats.won++;
       s.res.pearls += 1; s.res.stone += 3;
       lines.push(`${who} (strength ${p}), but your towers (${e.defence}) chased them away! You found 1 pearl and 3 stone.`);
     } else {

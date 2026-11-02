@@ -205,6 +205,36 @@ export function decorLayer(terrain: Record<string, Terrain>, built: Set<string>,
   return `<g>${flat}</g><g>${tall}</g>`;
 }
 
+// ---------- clouds ----------
+
+/**
+ * Clouds over land that is not explored yet. `leaving` is an area that was just explored:
+ * it is drawn once more so its clouds can drift away.
+ */
+export function cloudLayer(
+  terrain: Record<string, Terrain>, region: Record<string, number>, open: number[],
+  toPixel: (k: string) => { x: number; y: number }, leaving: number | null = null,
+): string {
+  const groups = new Map<number, { shade: string; base: string; puffs: string }>();
+  for (const k of Object.keys(region)) {
+    const id = region[k];
+    if (open.includes(id) && id !== leaving) continue;
+    if (!groups.has(id)) groups.set(id, { shade: '', base: '', puffs: '' });
+    const g = groups.get(id)!;
+    const { x, y } = toPixel(k);
+    const rnd = cellRand(k + '~');
+    g.shade += `<polygon points="${hexPoints(x, y + 10, S + 10)}"/>`;
+    g.base += `<polygon points="${hexPoints(x, y, S + 9)}"/>`;
+    for (let i = 0; i < 3; i++) {
+      const cx = x + (rnd() - 0.5) * S * 1.2, cy = y - 6 + (rnd() - 0.5) * S * 0.9;
+      const r = S * (0.42 + rnd() * 0.25);
+      g.puffs += `<circle cx="${cx.toFixed(1)}" cy="${(cy + r * 0.25).toFixed(1)}" r="${r.toFixed(1)}" class="cl-mid"/><circle cx="${(cx - r * 0.15).toFixed(1)}" cy="${(cy - r * 0.08).toFixed(1)}" r="${(r * 0.82).toFixed(1)}" class="cl-top"/>`;
+    }
+  }
+  return [...groups].map(([id, g]) =>
+    `<g class="cloud-area${id === leaving ? ' leaving' : ''}" style="animation-delay:-${(id * 1.7).toFixed(1)}s"><g class="cl-shade">${g.shade}</g><g class="cl-base">${g.base}</g>${g.puffs}</g>`).join('');
+}
+
 // ---------- paths ----------
 
 /**

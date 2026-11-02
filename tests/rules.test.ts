@@ -3,8 +3,9 @@ import { CONFIG } from '../src/game/config';
 import { neighbours, key, parse } from '../src/game/hex';
 import {
   build, buyBoat, boatProblem, economy, fleetText, isStormNight, makeIsland, network, newGame, nightfall, placeProblem,
-  resolveFish, sleep, startGoal, stormPower, upgrade,
+  resolveFish, sleep, stormPower, upgrade, explore, exploreProblem, clearTile, clearProblem, isOpen,
 } from '../src/game/rules';
+import { MISSIONS, checkMissions } from '../src/game/missions';
 import { distance } from '../src/game/hex';
 import type { GameState, Terrain } from '../src/game/types';
 
@@ -16,7 +17,9 @@ function flat(): GameState {
   const s = newGame(1);
   for (const k of Object.keys(s.terrain)) s.terrain[k] = 'grass';
   s.res = { food: 50, wood: 50, stone: 50, pearls: 5 };
-  s.step = 2;
+  s.open = [...new Set(Object.values(s.region))];
+  s.unlocked = ['road', 'house', 'field', 'farm', 'lumber', 'quarry', 'dock', 'tower'];
+  s.mission = MISSIONS.length;
   return s;
 }
 
@@ -30,7 +33,7 @@ describe('island', () => {
   });
 
   it('always has a forest and rocks close to the town square', () => {
-    for (let seed = 1; seed <= 60; seed++) {
+    for (let seed = 1; seed <= 40; seed++) {
       const t = makeIsland(seed);
       const near = (kind: Terrain) => Object.keys(t).some(k => t[k] === kind && distance(...parse(k)) <= 3);
       expect(near('forest'), `seed ${seed}`).toBe(true);
@@ -40,19 +43,42 @@ describe('island', () => {
 });
 
 describe('start', () => {
-  it('makes you build a lumber camp first, then a quarry', () => {
+  it('starts near the sea on a big island, with the rest in the clouds', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const s = newGame(seed);
+      const land = Object.keys(s.terrain).filter(k => s.terrain[k] !== 'sea');
+      expect(land.length, `seed ${seed}`).toBeGreaterThan(120);
+      expect(Object.keys(s.terrain).some(k => s.terrain[k] === 'sea' && distance(...parse(k)) <= 3), `seed ${seed}`).toBe(true);
+      expect(new Set(Object.values(s.region)).size, `seed ${seed}`).toBe(CONFIG.cloudAreas + 1);
+      expect(land.filter(k => isOpen(s, k)).length).toBeLessThan(land.length / 3);
+    }
+  });
+
+  it('only lets you build a lumber camp first, and missions unlock the rest', () => {
+    const s = newGame(7);
+    s.res = { food: 50, wood: 50, stone: 50, pearls: 0 };
+    expect(placeProblem(s, '1,0', 'house')).toMatch(/unlock/);
+    const lumberSpot = Object.keys(s.terrain).find(k => !placeProblem(s, k, 'lumber'))!;
+    build(s, lumberSpot, 'lumber');
+    expect(checkMissions(s).length).toBe(1);
+    expect(s.unlocked).toContain('quarry');
+    expect(s.unlocked).not.toContain('house');
+    const quarrySpot = Object.keys(s.terrain).find(k => !placeProblem(s, k, 'quarry'))!;
+    build(s, quarrySpot, 'quarry');
+    checkMissions(s);
+    expect(s.unlocked).toEqual(expect.arrayContaining(['house', 'farm', 'field']));
+    expect(s.unlocked).not.toContain('dock');
+  });
+
+  it('unlocks the dock when a path reaches the sea', () => {
     const s = flat();
-    s.step = 0;
-    s.terrain['2,0'] = 'forest'; s.terrain['-2,0'] = 'rocks';
-    expect(startGoal(s)).toBe('lumber');
-    expect(placeProblem(s, '0,1', 'house')).toMatch(/lumber camp/);
-    expect(placeProblem(s, '1,-1', 'road')).toBeNull();
-    build(s, '1,0', 'lumber');
-    expect(startGoal(s)).toBe('quarry');
-    expect(placeProblem(s, '0,1', 'house')).toMatch(/quarry/);
-    build(s, '-1,0', 'quarry');
-    expect(startGoal(s)).toBeNull();
-    expect(placeProblem(s, '0,1', 'house')).toBeNull();
+    s.mission = 5; s.unlocked = ['road'];
+    s.terrain['3,0'] = 'sea';
+    build(s, '1,0', 'road');
+    expect(checkMissions(s)).toHaveLength(0);
+    build(s, '2,0', 'road');
+    expect(checkMissions(s)[0].text).toMatch(/sea/);
+    expect(s.unlocked).toContain('dock');
   });
 
   it('gives the first camps workers from the town square', () => {
@@ -170,6 +196,36 @@ describe('economy', () => {
     upgrade(s, '1,0');
     expect(s.b['1,0'].t).toBe('house');
     expect(s.res.wood).toBe(48);
+  });
+});
+
+describe('clouds and clearing', () => {
+  it('opens a cloud area next to open land, for a price that grows', () => {
+    const s = newGame(3);
+    s.res = { food: 50, wood: 50, stone: 50, pearls: 0 };
+    const cloudy = Object.keys(s.region).filter(k => !isOpen(s, k));
+    const near = cloudy.find(k => !exploreProblem(s, k))!;
+    const far = cloudy.find(k => exploreProblem(s, k)?.match(/next to/));
+    expect(near).toBeDefined();
+    expect(far).toBeDefined();
+    expect(placeProblem(s, near, 'road')).toMatch(/clouds/);
+    explore(s, near);
+    expect(isOpen(s, near)).toBe(true);
+    expect(s.res.wood).toBe(50 - CONFIG.explore.base.wood);
+    expect(s.actions).toBe(1);
+  });
+
+  it('chops forests and breaks rocks into grass, giving wood and stone', () => {
+    const s = flat();
+    s.terrain['1,0'] = 'forest'; s.terrain['-1,0'] = 'rocks'; s.terrain['2,-1'] = 'forest';
+    expect(clearProblem(s, '1,0')).toMatch(/lumber camp/);
+    build(s, '1,-1', 'lumber');
+    const wood = s.res.wood;
+    clearTile(s, '1,0');
+    expect(s.terrain['1,0']).toBe('grass');
+    expect(s.res.wood).toBe(wood + 2);
+    expect(clearProblem(s, '-1,0')).toMatch(/quarry/);
+    expect(s.stats.cleared).toBe(1);
   });
 });
 

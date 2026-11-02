@@ -19,9 +19,19 @@ export interface Building {
 }
 
 export interface GameState {
-  version: 2;
+  version: 3;
   seed: number;
   terrain: Record<string, Terrain>;
+  /** Which cloud area each land cell is in. Area 0 is where you start. Sea cells are not listed. */
+  region: Record<string, number>;
+  /** Areas that are out of the clouds. */
+  open: number[];
+  /** Missions done so far (index of the current mission). */
+  mission: number;
+  /** Buildings you may build. More are unlocked by missions. */
+  unlocked: BuildableType[];
+  /** Counters for missions. */
+  stats: { won: number; cleared: number };
   b: Record<string, Building>;
   res: Resources;
   day: number;
@@ -29,8 +39,6 @@ export interface GameState {
   fished: boolean;
   over: boolean;
   storms: number;
-  /** Start steps: 0 = build a lumber camp, 1 = build a quarry, 2 (or missing) = free building. */
-  step?: number;
 }
 
 export interface NightReport {
