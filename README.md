@@ -1,6 +1,6 @@
 # Tiny Island
 
-A calm island-building puzzle game for iPhone. Place tiles, upgrade buildings, go fishing and keep the Fog Pirates away.
+A calm island village builder for iPhone. Build paths, houses, farms and docks, buy boats, go fishing and keep the Fog Pirates away.
 Built with TypeScript + Vite and packaged as an iPhone app with Capacitor.
 
 ## Play in a browser (any computer)
@@ -15,8 +15,8 @@ npm test           # test the game rules
 
 | Folder | What is in it |
 | --- | --- |
-| `src/game/` | Game rules without any screen code: tiles, yields, nights, pirates, fishing. All balance numbers live in `config.ts`. |
-| `src/main.ts` | Screens: start menu, board, night and fishing pop-ups. |
+| `src/game/` | Game rules without any screen code: island generation, costs, paths, workers, farms, boats, nights, pirates, fishing. All balance numbers live in `config.ts`. |
+| `src/main.ts` | Screens: start menu, the island (drag and zoom), build menu, night and fishing pop-ups. |
 | `src/storage.ts` | Saves the game and best score (works on iPhone and in the browser). |
 | `ios/` | The Xcode project for iPhone. |
 | `src/art.ts` | All tile pictures, drawn as SVG in code. |

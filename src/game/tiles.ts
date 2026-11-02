@@ -1,18 +1,30 @@
-import type { TileType } from './types';
+import type { BuildableType, BuildingType, Terrain } from './types';
 
-export interface TileInfo {
+export interface BuildingInfo {
   name: string;
-  icon: string;
-  color: string;
   info: string;
 }
 
-export const TILES: Record<TileType, TileInfo> = {
-  field:  { name: 'Field',  icon: '🌾', color: '#d9b54a', info: 'Makes 1 food each night. +1 for each house next to it (up to +2).' },
-  forest: { name: 'Forest', icon: '🌲', color: '#3f8f4f', info: 'Makes 1 wood each night. +1 when it touches 2 other forests.' },
-  house:  { name: 'House',  icon: '🏠', color: '#e9967a', info: 'Home for 2 people per level. Each person eats 1 food each night.' },
-  quarry: { name: 'Quarry', icon: '⛏️', color: '#8d8f94', info: 'Makes 1 stone each night.' },
-  dock:   { name: 'Dock',   icon: '⚓', color: '#6fa8c9', info: 'Makes 1 food for each water spot next to it (up to 3). Lets you go fishing!' },
-  tower:  { name: 'Tower', icon: '🗼', color: '#8a78c0', info: 'Gives 3 defence per level against the Fog Pirates.' },
-  ruin:   { name: 'Ruin',   icon: '🏚️', color: '#5d5a55', info: 'Broken. Fix it into a house for 2 wood.' },
+export const BUILDINGS: Record<BuildingType, BuildingInfo> = {
+  plaza:  { name: 'Town square', info: 'The heart of your village. Every path starts here.' },
+  road:   { name: 'Path',        info: 'Connects buildings to the town square. Buildings only work when a path leads to them. Paths do not use a building turn.' },
+  house:  { name: 'House',       info: 'Home for 2 people per level. People work in your buildings and each person eats 1 food a night.' },
+  farm:   { name: 'Farm',        info: 'Farmers look after 2 fields per level, up to 2 steps away. Needs 2 workers per level.' },
+  field:  { name: 'Field',       info: 'Grows 2 food a night, but only when a farm nearby looks after it.' },
+  lumber: { name: 'Lumber camp', info: 'Chops 1 wood a night for each forest next to it (up to 3). Needs 1 worker per level.' },
+  quarry: { name: 'Quarry',      info: 'Digs 1 stone a night for each rock next to it (up to 2). Needs 1 worker per level.' },
+  dock:   { name: 'Dock',        info: 'Built on the beach with its pier in the water. Catches 1 food a night per level, and you can buy boats here.' },
+  tower:  { name: 'Tower',       info: 'Gives 3 defence per level against the Fog Pirates.' },
+  ruin:   { name: 'Ruin',        info: 'Broken by pirates or left empty. Fix it for half the price.' },
+};
+
+/** Order of the build menu. */
+export const BUILD_MENU: BuildableType[] = ['road', 'house', 'field', 'farm', 'lumber', 'quarry', 'dock', 'tower'];
+
+export const TERRAIN_INFO: Record<Terrain, { name: string; info: string }> = {
+  sea:    { name: 'Sea',    info: 'Deep water. Docks reach into it.' },
+  beach:  { name: 'Beach',  info: 'Sand. Good for paths, docks and towers.' },
+  grass:  { name: 'Grass',  info: 'Good land to build on.' },
+  forest: { name: 'Forest', info: 'Trees. Build a lumber camp next to it to get wood.' },
+  rocks:  { name: 'Rocks',  info: 'Big stones. Build a quarry next to it to get stone.' },
 };

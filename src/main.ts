@@ -5,45 +5,42 @@ import '@fontsource/nunito/700.css';
 import '@fontsource/nunito/800.css';
 import './styles.css';
 import { CONFIG } from './game/config';
-import { gridCells, key, parse, toPixel } from './game/hex';
+import { distance, key, neighbours, parse, toPixel as hexToPixel } from './game/hex';
 import {
-  canFish, canPay, canPlace, bestDockLevel, formatYield, isStormNight, newGame, place,
-  resolveFish, score, stormPower, totals, upgrade, upgradeCost, yieldOf,
+  boatProblem, build, buildCost, buyBoat, canFish, canPay, economy, fishZone, formatYield, isStormNight,
+  newGame, placeProblem, resolveFish, score, sleep, stormPower, terrainAt, upgrade, upgradeCost, upgradeProblem,
 } from './game/rules';
-import { TILES } from './game/tiles';
+import { BUILDINGS, BUILD_MENU, TERRAIN_INFO } from './game/tiles';
 import { GAME_NAME } from './game/brand';
-import type { GameState, NightReport, Resources } from './game/types';
+import type { BoatType, BuildableType, Cost, GameState, NightReport, Resources } from './game/types';
 import { tap } from './feedback';
 import { loadBest, loadGame, saveBest, saveGame } from './storage';
-import { ICONS, cardSvg, heroIsland, hexPoints, pirateShip, tileSvg } from './art';
+import { ICONS, S, boatSvg, buildingSvg, heroIsland, hexPoints, menuIcon, pathLayer, pirateShip, terrainLayer } from './art';
 import { musicOn, play, soundOn, toggleMusic, toggleSfx, unlockAudio } from './audio';
 
 const root = document.getElementById('app')!;
-const SIZE = 30;
-// Draw back rows first so the 3D tile sides overlap correctly.
-const cells = gridCells(CONFIG.gridRadius).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
-const RES = [
-  ['food', 'food'], ['wood', 'wood'], ['stone', 'stone'],
-  ['pearls', 'pearls'], ['pop', 'people'], ['def', 'defence'],
-] as const;
-const YIELD_ICON: Record<string, string> = { food: '🐟', wood: '🪵', stone: '🪨' };
+const YIELD_ICON: Record<string, string> = { food: '🐟', wood: '🪵', stone: '🪨', pearls: '🦪' };
+const BOATS: BoatType[] = ['rowboat', 'fishingboat', 'sailboat'];
 
-let S: GameState;
+let G: GameState;
 let best = 0;
-let selCard: number | null = null;
+let tool: BuildableType | null = null;
 let pending: string | null = null;
-let selTile: string | null = null;
-let flash: Record<string, boolean> = {};
-let justPlaced: string | null = null;
+let sel: string | null = null;
+let hint = '';
+let justBuilt: string | null = null;
 let justUpgraded: string | null = null;
 let busy = false;
+let built = '';
+const cam = { x: 0, y: 0, z: 1 };
 
 const $ = (id: string) => document.getElementById(id)!;
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const px = (k: string) => { const [q, r] = parse(k); return hexToPixel(q, r, S); };
+const nbKeys = (k: string) => neighbours(...parse(k)).map(([a, b]) => key(a, b));
 
-// Sound may only start after a touch, so unlock it on the very first one.
 document.addEventListener('pointerdown', unlockAudio, { once: true });
 
 // ---------- screens ----------
@@ -52,7 +49,7 @@ function startScreen(hasSave: boolean): void {
     <div class="start">
       ${heroIsland}
       <h1>${GAME_NAME}</h1>
-      <p>Build your island, go fishing and keep the Fog Pirates away!</p>
+      <p>Build a village on your island, go fishing and keep the Fog Pirates away!</p>
       <div class="stack">
         ${hasSave ? '<button class="btn" id="sGo">Keep playing</button>' : ''}
         <button class="btn ${hasSave ? 'ghost' : ''}" id="sNew">New island</button>
@@ -62,7 +59,7 @@ function startScreen(hasSave: boolean): void {
       <div class="sound-row">${soundButtons()}</div>
     </div>`;
   if (hasSave) $('sGo').onclick = () => { unlockAudio(); play('select'); tap(); gameScreen(); };
-  $('sNew').onclick = () => { unlockAudio(); play('select'); tap(); S = newGame(); void saveGame(S); gameScreen(); };
+  $('sNew').onclick = () => { unlockAudio(); play('select'); tap(); G = newGame(); void saveGame(G); gameScreen(); };
   $('sHow').onclick = () => { unlockAudio(); play('tap'); howTo(); };
   wireSoundButtons();
 }
@@ -83,12 +80,15 @@ function refreshSoundButtons(): void {
 
 function howTo(): void {
   modal(`<h2>How to play</h2><div class="howto"><ul>
-    <li>Pick a tile and put it next to your island. Tap a yellow spot two times.</li>
-    <li>After ${CONFIG.turnsPerDay} turns it gets dark. Your island makes food, wood and stone, and your people eat.</li>
-    <li>Tap a tile on your island to make it bigger and better.</li>
-    <li>Some nights the Fog Pirates come. Towers keep them away.</li>
-    <li>Build a dock to go fishing once a day.</li>
-    <li>After ${CONFIG.days} days you get your score. More people and pearls means more points!</li>
+    <li>Pick something from the build menu and tap a green spot. Everything costs wood, stone or food.</li>
+    <li>Build paths from your town square. Buildings only work when a path leads to them.</li>
+    <li>Houses give you people. People work in farms, lumber camps, quarries and docks.</li>
+    <li>Fields only grow food when a farm is close by. One farm looks after 2 fields, more after an upgrade.</li>
+    <li>Put a lumber camp next to a forest and a quarry next to rocks.</li>
+    <li>A dock goes on the beach. Buy boats there for more fish!</li>
+    <li>You can build ${CONFIG.actionsPerDay} things a day. Then night falls, your island makes things and your people eat.</li>
+    <li>Every second night the Fog Pirates come. Towers keep them away.</li>
+    <li>Drag to look around the island. Pinch or use + and − to zoom.</li>
   </ul></div><button class="btn" id="mOk">Let's play!</button>`);
   $('mOk').onclick = () => { play('tap'); closeModal(); };
 }
@@ -104,94 +104,215 @@ function gameScreen(): void {
         </div>
       </div>
       <div class="hud"><div class="res" id="res"></div><div class="banner" id="banner"></div></div>
-      <div class="board" id="board"></div>
-      <div class="panel"><div class="info" id="info"></div><div class="hand" id="hand"></div><div class="actions" id="actions"></div></div>
+      <div class="board" id="board">
+        <svg id="svg" role="img" aria-label="Your island">
+          <g class="waves" id="waves"></g><g id="terrain"></g><g id="paths"></g><g id="overlay"></g><g id="buildings"></g><g id="marks"></g><g id="fx"></g>
+        </svg>
+        <div class="zoom"><button class="icon-btn" id="zIn" aria-label="Zoom in">+</button><button class="icon-btn" id="zOut" aria-label="Zoom out">−</button><button class="icon-btn" id="zHome" aria-label="Back to the town square">⌂</button></div>
+      </div>
+      <div class="panel"><div class="info" id="info"></div><div id="tools"></div></div>
     </div>
-    <div class="overlay" id="overlay" hidden><div class="modal" id="modal"></div></div>`;
+    <div class="overlay" id="overlay-modal" hidden><div class="modal" id="modal"></div></div>`;
   $('home').onclick = () => { play('tap'); startScreen(true); };
   wireSoundButtons();
-  selCard = pending = selTile = null;
-  busy = false;
+  tool = pending = sel = null; hint = ''; busy = false;
+  drawWaves();
+  $('terrain').innerHTML = terrainLayer(G.terrain, px);
+  setupCamera();
   render();
-  if (S.over) showEnd(['This island is finished.']);
+  if (G.over) showEnd(['This island is finished.']);
 }
 
 // ---------- modal ----------
-function ensureOverlay(): void {
-  if (!document.getElementById('overlay')) {
-    root.insertAdjacentHTML('beforeend', '<div class="overlay" id="overlay" hidden><div class="modal" id="modal"></div></div>');
-  }
-}
 function modal(html: string): void {
-  ensureOverlay();
+  if (!document.getElementById('overlay-modal')) root.insertAdjacentHTML('beforeend', '<div class="overlay" id="overlay-modal" hidden><div class="modal" id="modal"></div></div>');
   $('modal').innerHTML = html;
-  $('overlay').hidden = false;
+  $('overlay-modal').hidden = false;
   setTimeout(() => document.getElementById('mOk')?.focus(), 30);
 }
 function closeModal(): void {
-  $('overlay').hidden = true;
+  $('overlay-modal').hidden = true;
   document.getElementById('game')?.classList.remove('is-night');
-  if (document.getElementById('board')) render();
+  const fx = document.getElementById('fx');
+  if (fx) fx.innerHTML = '';
+  if (document.getElementById('svg')) render();
 }
 
-// ---------- game flow ----------
-async function doPlace(k: string): Promise<void> {
-  if (selCard === null || busy) return;
-  const [q, r] = parse(k);
-  const report = place(S, selCard, q, r);
-  play('place');
-  tap();
-  selCard = null; pending = null; selTile = k; flash = {}; justPlaced = k;
-  void saveGame(S);
+// ---------- camera: drag to pan, pinch or buttons to zoom ----------
+const WORLD = () => S * Math.sqrt(3) * (CONFIG.gridRadius + 0.5);
+
+function applyCamera(): void {
+  const svg = document.getElementById('svg');
+  if (!svg) return;
+  const w = svg.clientWidth || 360, h = svg.clientHeight || 400;
+  const lim = WORLD();
+  cam.x = Math.max(-lim, Math.min(lim, cam.x));
+  cam.y = Math.max(-lim, Math.min(lim, cam.y));
+  svg.setAttribute('viewBox', `${cam.x - (w * cam.z) / 2} ${cam.y - (h * cam.z) / 2} ${w * cam.z} ${h * cam.z}`);
+}
+function zoomBy(f: number): void {
+  const svg = $('svg');
+  const minZ = (S * Math.sqrt(3) * 4.5) / (svg.clientWidth || 360);
+  const maxZ = (WORLD() * 2.3) / (svg.clientWidth || 360);
+  cam.z = Math.max(minZ, Math.min(maxZ, cam.z * f));
+  applyCamera();
+}
+function homeCamera(): void {
+  const svg = $('svg');
+  cam.x = 0; cam.y = 0;
+  cam.z = (S * Math.sqrt(3) * 8.5) / (svg.clientWidth || 360);
+  applyCamera();
+}
+
+function setupCamera(): void {
+  const svg = $('svg') as unknown as SVGSVGElement;
+  homeCamera();
+  new ResizeObserver(applyCamera).observe(svg);
+  $('zIn').onclick = () => { play('tap'); zoomBy(0.8); };
+  $('zOut').onclick = () => { play('tap'); zoomBy(1.25); };
+  $('zHome').onclick = () => { play('tap'); homeCamera(); };
+  const pts = new Map<number, { x: number; y: number }>();
+  let moved = 0, pinch = 0;
+  svg.addEventListener('pointerdown', e => {
+    svg.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 1) moved = 0;
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); moved = 99; }
+  });
+  svg.addEventListener('pointermove', e => {
+    const p = pts.get(e.pointerId);
+    if (!p) return;
+    if (pts.size === 1) {
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      moved += Math.abs(dx) + Math.abs(dy);
+      if (moved > 8) { cam.x -= dx * cam.z; cam.y -= dy * cam.z; applyCamera(); }
+    } else if (pts.size === 2) {
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const [a, b] = [...pts.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinch > 0 && d > 0) zoomBy(pinch / d);
+      pinch = d;
+      return;
+    }
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  });
+  const end = (e: PointerEvent) => {
+    const wasTap = pts.size === 1 && moved <= 8;
+    pts.delete(e.pointerId);
+    if (wasTap && e.type === 'pointerup') onBoardTap(e.clientX, e.clientY);
+  };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
+  svg.addEventListener('wheel', e => { e.preventDefault(); zoomBy(e.deltaY > 0 ? 1.1 : 0.9); }, { passive: false });
+}
+
+function clientToHex(cx: number, cy: number): string {
+  const svg = $('svg') as unknown as SVGSVGElement;
+  const pt = svg.createSVGPoint();
+  pt.x = cx; pt.y = cy;
+  const p = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+  const qf = ((Math.sqrt(3) / 3) * p.x - (1 / 3) * p.y) / S;
+  const rf = ((2 / 3) * p.y) / S;
+  let q = Math.round(qf), r = Math.round(rf);
+  const s = Math.round(-qf - rf);
+  const dq = Math.abs(q - qf), dr = Math.abs(r - rf), ds = Math.abs(s - (-qf - rf));
+  if (dq > dr && dq > ds) q = -r - s; else if (dr > ds) r = -q - s;
+  return key(q, r);
+}
+
+// ---------- tapping the island ----------
+function onBoardTap(cx: number, cy: number): void {
+  if (busy || G.over) return;
+  const k = clientToHex(cx, cy);
+  if (distance(...parse(k)) > CONFIG.gridRadius) return;
+  if (tool) {
+    const problem = placeProblem(G, k, tool);
+    if (problem) { hint = problem; pending = null; play('error'); render(); return; }
+    if (pending === k) { void doBuild(k); return; }
+    pending = k; hint = ''; play('tap'); tap(); render();
+    return;
+  }
+  sel = sel === k ? null : k;
+  hint = '';
+  play('tap');
   render();
-  if (report) await nightSequence(report);
 }
 
-/** Night falls: the board darkens, every tile shows what it made, and on pirate nights the ships sail in. */
+// ---------- actions ----------
+async function doBuild(k: string): Promise<void> {
+  if (!tool || busy) return;
+  const t = tool;
+  const rep = build(G, k, t);
+  play('place'); tap();
+  justBuilt = k; pending = null; hint = '';
+  if (t !== 'road') { tool = null; sel = null; hint = ''; built = `${BUILDINGS[t].name} built!`; }
+  void saveGame(G);
+  render();
+  if (rep) await nightSequence(rep);
+}
+
+async function doUpgrade(k: string): Promise<void> {
+  const rep = upgrade(G, k);
+  play('upgrade'); tap(true);
+  justUpgraded = k;
+  void saveGame(G);
+  render();
+  if (rep) await nightSequence(rep);
+}
+
+async function doBoat(k: string, b: BoatType): Promise<void> {
+  const rep = buyBoat(G, k, b);
+  play('catch'); tap(true);
+  justUpgraded = k;
+  void saveGame(G);
+  render();
+  if (rep) await nightSequence(rep);
+}
+
+async function doSleep(): Promise<void> {
+  if (busy) return;
+  tool = null; pending = null; sel = null;
+  render();
+  await nightSequence(sleep(G));
+}
+
+/** Night falls: the island darkens, every building shows what it made, and on pirate nights the ships sail in. */
 async function nightSequence(rep: NightReport): Promise<void> {
   busy = true;
+  void saveGame(G);
   await wait(350);
-  const game = document.getElementById('game');
-  game?.classList.add('is-night');
+  $('game').classList.add('is-night');
   play('night');
   tap(true);
-  const svg = document.querySelector<SVGSVGElement>('#board svg');
+  const fx = $('fx');
   const fast = reduceMotion();
-  // A dark veil over the island; numbers and ships are drawn on top of it so they stay bright.
-  svg?.insertAdjacentHTML('beforeend', '<rect class="nightveil" x="-1000" y="-1000" width="2000" height="2000"/>');
-  if (svg) {
-    rep.yields.forEach(({ k, y }, i) => {
-      const [q, r] = parse(k);
-      const { x, y: py } = toPixel(q, r, SIZE);
-      const txt = (Object.entries(y) as [keyof Resources, number][]).filter(([, n]) => n).map(([n, a]) => `+${a}${YIELD_ICON[n] ?? ''}`).join(' ');
-      setTimeout(() => {
-        svg.insertAdjacentHTML('beforeend', `<text class="float" x="${x}" y="${py - 10}">${txt}</text>`);
-        if (i % 3 === 0) play('coin');
-      }, fast ? 0 : 120 + i * 70);
-    });
-  }
-  await wait(fast ? 600 : 1300 + rep.yields.length * 70);
+  fx.innerHTML = '<rect class="nightveil" x="-3000" y="-3000" width="6000" height="6000"/>';
+  rep.yields.forEach(({ k, y }, i) => {
+    const { x, y: py } = px(k);
+    const txt = (Object.entries(y) as [keyof Resources, number][]).filter(([, n]) => n).map(([n, a]) => `+${a}${YIELD_ICON[n] ?? ''}`).join(' ');
+    setTimeout(() => {
+      fx.insertAdjacentHTML('beforeend', `<text class="float" x="${x}" y="${py - 14}">${txt}</text>`);
+      if (i % 3 === 0) play('coin');
+    }, fast ? 0 : 120 + i * 80);
+  });
+  await wait(fast ? 600 : 1400 + rep.yields.length * 80);
 
-  if (rep.isStorm && svg) {
+  if (rep.isStorm) {
     play('pirates');
-    const R = CONFIG.gridRadius;
-    const far = SIZE * Math.sqrt(3) * (R + 1.5);
-    const near = SIZE * Math.sqrt(3) * 2.2;
+    const far = WORLD() * 0.95;
+    const near = S * Math.sqrt(3) * 4.2;
     const angles = [-0.6, 1.4, 2.9].map(a => a + Math.random() * 0.6);
-    const ships = angles.map(a => {
-      const fx = Math.cos(a) * far, fy = Math.sin(a) * far * 0.8;
-      const nx = Math.cos(a) * near, ny = Math.sin(a) * near * 0.8;
-      const values = rep.stormWon ? `${fx} ${fy}; ${nx * 1.5} ${ny * 1.5}; ${fx * 1.3} ${fy * 1.3}` : `${fx} ${fy}; ${nx} ${ny}`;
-      const flip = fx > 0 ? ' scale(-1,1)' : '';
-      return `<g class="ship"><g><animateTransform attributeName="transform" type="translate" values="${values}" dur="${fast ? 0.5 : 2.2}s" fill="freeze"/><g transform="scale(1.1)${flip}">${pirateShip}</g></g></g>`;
-    }).join('');
-    svg.insertAdjacentHTML('beforeend', ships);
+    fx.insertAdjacentHTML('beforeend', angles.map(a => {
+      const fx1 = Math.cos(a) * far, fy1 = Math.sin(a) * far;
+      const nx = Math.cos(a) * near, ny = Math.sin(a) * near;
+      const values = rep.stormWon ? `${fx1} ${fy1}; ${nx * 1.4} ${ny * 1.4}; ${fx1 * 1.2} ${fy1 * 1.2}` : `${fx1} ${fy1}; ${nx} ${ny}`;
+      const flip = fx1 > 0 ? ' scale(-1,1)' : '';
+      return `<g class="ship"><g><animateTransform attributeName="transform" type="translate" values="${values}" dur="${fast ? 0.5 : 2.2}s" fill="freeze"/><g transform="scale(1.6)${flip}">${pirateShip}</g></g></g>`;
+    }).join(''));
     if (rep.stormWon) {
-      // Towers fire back.
-      Object.entries(S.tiles).filter(([, v]) => v.t === 'tower').forEach(([k], i) => {
-        const [q, r] = parse(k);
-        const { x, y } = toPixel(q, r, SIZE);
-        setTimeout(() => svg.insertAdjacentHTML('beforeend', `<circle class="boom" cx="${x}" cy="${y - 20}" r="6"/>`), 700 + i * 180);
+      Object.entries(G.b).filter(([, v]) => v.t === 'tower').forEach(([k], i) => {
+        const { x, y } = px(k);
+        setTimeout(() => fx.insertAdjacentHTML('beforeend', `<circle class="boom" cx="${x}" cy="${y - 30}" r="8"/>`), 700 + i * 180);
       });
     }
     await wait(fast ? 600 : 2300);
@@ -200,28 +321,27 @@ async function nightSequence(rep: NightReport): Promise<void> {
 
   busy = false;
   if (rep.gameOver) { play('end'); showEnd(rep.lines, rep.title); return; }
-  const next = isStormNight(S.day)
-    ? `Watch out! The Fog Pirates come tonight (strength ${stormPower(S)}).`
+  const next = isStormNight(G.day)
+    ? `Watch out! The Fog Pirates come tonight (strength ${stormPower(G)}).`
     : 'Tonight the sea will be calm.';
-  modal(`<div class="moon" aria-hidden="true">${rep.isStorm ? '🏴‍☠️' : '🌙'}</div><h2>${rep.title}</h2><ul>${rep.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><div class="small">${next}</div><button class="btn" id="mOk">Start day ${S.day}</button>`);
+  modal(`<div class="moon" aria-hidden="true">${rep.isStorm ? '🏴‍☠️' : '🌙'}</div><h2>${rep.title}</h2><ul>${rep.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><div class="small">${next}</div><button class="btn" id="mOk">Start day ${G.day}</button>`);
   $('mOk').onclick = () => { play('select'); closeModal(); };
 }
 
 function showEnd(lines: string[], title = `Your island after ${CONFIG.days} days`): void {
-  const sc = score(S);
+  const sc = score(G);
   const isBest = sc > best;
   if (isBest) { best = sc; void saveBest(sc); }
   modal(`<div class="moon" aria-hidden="true">🏆</div><h2>${title}</h2><ul>${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>
     <div><div class="small">Your score</div><div class="big">${sc}</div><div class="small">${isBest ? 'New best score!' : `Best score: ${best}`}</div></div>
     <button class="btn" id="mOk">New island</button>`);
-  $('mOk').onclick = () => { play('select'); S = newGame(); void saveGame(S); closeModal(); };
+  $('mOk').onclick = () => { play('select'); G = newGame(); void saveGame(G); closeModal(); gameScreen(); };
 }
 
 function fish(): void {
-  if (!canFish(S) || busy) return;
+  if (!canFish(G) || busy) return;
   play('cast');
-  const f = CONFIG.fishing;
-  const w = f.zoneBase + f.zonePerLevel * (bestDockLevel(S) - 1);
+  const w = fishZone(G);
   const start = 0.1 + Math.random() * (0.8 - w);
   const speed = 0.0024 + Math.random() * 0.0008;
   const t0 = performance.now();
@@ -242,136 +362,199 @@ function fish(): void {
     if (done) return;
     done = true;
     cancelAnimationFrame(raf);
-    const res = resolveFish(S, (pos - start) / w);
+    const res = resolveFish(G, (pos - start) / w);
     play(res.kind === 'good' ? 'catch' : res.kind);
     tap(res.kind !== 'miss');
-    void saveGame(S);
+    void saveGame(G);
     const pic = res.kind === 'perfect' ? '✨🐠✨' : res.kind === 'good' ? '🐟' : '💦';
     const msg = res.kind === 'perfect' ? `Perfect! A shiny pearl fish: +${res.food} food and +1 pearl.`
       : res.kind === 'good' ? `Nice catch: +${res.food} food.`
       : 'Oops, it got away. You found 1 tiny fish: +1 food.';
-    modal(`<h2>Fishing</h2><div class="catch">${pic}</div><div>${msg}</div><div class="small">You can fish again tomorrow. A better dock makes the green part bigger.</div><button class="btn" id="mOk">Back to my island</button>`);
+    modal(`<h2>Fishing</h2><div class="catch">${pic}</div><div>${msg}</div><div class="small">You can fish again tomorrow. Better docks and boats make the green part bigger.</div><button class="btn" id="mOk">Back to my island</button>`);
     $('mOk').onclick = () => { play('tap'); closeModal(); };
   };
 }
 
-// ---------- render ----------
-const WAVES = Array.from({ length: 9 }, (_, i) => {
-  const y = -170 + i * 42;
-  const x = (i % 2) * 40 - 260;
-  return `<path class="wave w${i % 3}" d="M${x} ${y} q15 -6 30 0 t30 0 t30 0" />
-          <path class="wave w${(i + 1) % 3}" d="M${x + 260} ${y + 20} q15 -6 30 0 t30 0" />`;
-}).join('');
-
-function render(): void {
-  const { pop, def } = totals(S);
-  const vals: Record<string, number> = { ...S.res, pop, def };
-  $('res').innerHTML = RES.map(([k, l]) =>
-    `<div class="r${flash[k] ? ' flash' : ''}"><div class="i">${ICONS[k]}</div><div class="v">${vals[k]}</div><div class="l">${l}</div></div>`).join('');
-  $('dayLbl').textContent = `Day ${S.day} of ${CONFIG.days}`;
-  $('scoreLbl').textContent = String(score(S));
-  const inDay = S.turn % CONFIG.turnsPerDay;
-  $('dots').innerHTML = Array.from({ length: CONFIG.turnsPerDay }, (_, i) =>
-    `<div class="dot${i < inDay ? ' done' : ''}${i === CONFIG.turnsPerDay - 1 ? ' night' : ''}"></div>`).join('');
-  const ban = $('banner');
-  const left = CONFIG.turnsPerDay - inDay;
-  if (isStormNight(S.day)) {
-    ban.className = 'banner storm';
-    ban.innerHTML = `<span>🏴‍☠️ Pirates tonight: strength ${stormPower(S)}</span><span>your defence ${def}</span>`;
-  } else {
-    ban.className = 'banner';
-    ban.innerHTML = `<span>🌙 ${left} ${left === 1 ? 'turn' : 'turns'} until night</span><span>people need ${pop} food</span>`;
-  }
-
-  const cur = selCard !== null ? S.offers[selCard] : null;
-  let sea = '', marks = '', land = '';
-  for (const [q, r] of cells) {
-    const { x, y } = toPixel(q, r, SIZE);
-    const k = key(q, r);
-    const v = S.tiles[k];
-    if (v) {
-      const cls = k === justPlaced ? 'drop' : k === justUpgraded ? 'pulse' : '';
-      land += `<g data-k="${k}" transform="translate(${x},${y})" class="cell">${tileSvg(v.t, v.l, SIZE, cls)}`;
-      if (selTile === k) land += `<polygon class="sel-ring" points="${hexPoints(0, 0, SIZE - 1)}"/>`;
-      land += '</g>';
-    } else {
-      sea += `<polygon class="hex-sea" points="${hexPoints(x, y, SIZE - 2)}"/>`;
-      if (pending === k && cur) {
-        land += `<g data-k="${k}" transform="translate(${x},${y})" class="cell ghost">${tileSvg(cur, 1, SIZE)}</g>`;
-      } else if (cur && canPlace(S, q, r, cur)) {
-        marks += `<g data-k="${k}" class="cell"><polygon class="hex-valid" points="${hexPoints(x, y, SIZE - 3)}"/></g>`;
-      } else {
-        marks += `<g data-k="${k}" class="cell"><polygon class="hex-hit" points="${hexPoints(x, y, SIZE - 2)}"/></g>`;
-      }
+// ---------- drawing ----------
+function drawWaves(): void {
+  const lim = WORLD() * 1.6;
+  let w = '';
+  for (let y = -lim, i = 0; y < lim; y += 46, i++) {
+    for (let x = -lim + (i % 2) * 60; x < lim; x += 170) {
+      w += `<path class="wave w${Math.abs(i + Math.round(x / 170)) % 3}" d="M${x.toFixed(0)} ${y.toFixed(0)} q15 -6 30 0 t30 0" />`;
     }
   }
-  justPlaced = null; justUpgraded = null;
-  const R = CONFIG.gridRadius;
-  const W = SIZE * Math.sqrt(3) * (2 * R + 1) + 8, H = SIZE * (3 * R + 2) + 16;
-  $('board').innerHTML = `<svg viewBox="${-W / 2} ${-H / 2} ${W} ${H}" role="img" aria-label="Your island">
-    <g class="waves">${WAVES}</g>${sea}${marks}${land}</svg>`;
+  $('waves').innerHTML = w;
+}
 
-  const info = $('info');
-  let acts = '';
-  if (S.over) {
-    info.innerHTML = `Game over! Your score: <b>${score(S)}</b>.`;
-  } else if (pending && cur) {
-    const [q, r] = parse(pending);
-    const y = formatYield(yieldOf(S, q, r, cur, 1));
-    const what = y === 'nothing' ? TILES[cur].info : `It makes ${y} each night here.`;
-    info.innerHTML = `<b>${TILES[cur].name}</b> here? ${what} Tap again to place it.`;
-    acts += '<button class="btn" id="aPlace">Place</button><button class="btn ghost" id="aCancel">Other spot</button>';
-  } else if (cur) {
-    info.innerHTML = `<b>${TILES[cur].name}</b>: ${TILES[cur].info} Pick a yellow spot.`;
-  } else if (selTile && S.tiles[selTile]) {
-    const v = S.tiles[selTile];
-    const [q, r] = parse(selTile);
-    const T = TILES[v.t];
-    const c = upgradeCost(v);
-    const lvl = v.t === 'ruin' ? '' : ` (level ${v.l})`;
-    const now = ['field', 'forest', 'quarry', 'dock'].includes(v.t) ? ` Now: ${formatYield(yieldOf(S, q, r, v.t, v.l))}.` : '';
-    info.innerHTML = `<b>${T.name}${lvl}</b>: ${T.info}${now}`;
-    if (c) {
-      const txt = Object.entries(c).map(([n, a]) => `${a} ${n}`).join(', ');
-      acts += `<button class="btn" id="aUp"${canPay(S, c) ? '' : ' disabled'}>${v.t === 'ruin' ? 'Rebuild' : 'Upgrade'}: ${txt}</button>`;
-    } else acts += '<span class="small muted">Max level!</span>';
-  } else {
-    info.innerHTML = 'Pick a tile below and put it next to your island. Tap a tile on your island to upgrade it.';
+const costHtml = (c: Cost) => (Object.entries(c) as [keyof Resources, number][])
+  .map(([k, n]) => `<span class="cost${G.res[k] < n ? ' short' : ''}">${n}<i>${ICONS[k]}</i></span>`).join('');
+
+function render(): void {
+  const e = economy(G);
+  // HUD
+  const vals: [string, string, string][] = [
+    ['food', String(G.res.food), 'food'], ['wood', String(G.res.wood), 'wood'], ['stone', String(G.res.stone), 'stone'],
+    ['pearls', String(G.res.pearls), 'pearls'], ['pop', `${e.people}<small>/${e.jobs}</small>`, 'people/jobs'], ['def', String(e.defence), 'defence'],
+  ];
+  $('res').innerHTML = vals.map(([k, v, l]) => `<div class="r${k === 'pop' && e.work < 1 ? ' warn' : ''}"><div class="i">${ICONS[k]}</div><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  $('dayLbl').textContent = `Day ${G.day} of ${CONFIG.days}`;
+  $('scoreLbl').textContent = String(score(G));
+  $('dots').innerHTML = Array.from({ length: CONFIG.actionsPerDay }, (_, i) => `<div class="dot${i < G.actions ? ' done' : ''}"></div>`).join('');
+  const left = CONFIG.actionsPerDay - G.actions;
+  const ban = $('banner');
+  const warn = isStormNight(G.day) ? `🏴‍☠️ Pirates tonight: ${stormPower(G)} vs your ${e.defence}` : `🔨 ${left} ${left === 1 ? 'build' : 'builds'} left today`;
+  ban.className = `banner${isStormNight(G.day) ? ' storm' : ''}`;
+  ban.innerHTML = `<span>${warn}</span><span class="ban-right">eat ${e.people}🐟 <button class="btn sleep" id="aSleep"${G.over || busy ? ' disabled' : ''}>Sleep 🌙</button></span>`;
+  $('aSleep').onclick = () => { play('select'); void doSleep(); };
+
+  // Paths and buildings
+  $('paths').innerHTML = pathLayer(G.b, nbKeys, px);
+  const order = Object.keys(G.b).filter(k => G.b[k].t !== 'road').sort((a, b) => px(a).y - px(b).y);
+  $('buildings').innerHTML = order.map(k => {
+    const v = G.b[k];
+    const { x, y } = px(k);
+    const cls = k === justBuilt ? 'drop' : k === justUpgraded ? 'pulse' : '';
+    const idle = v.t !== 'plaza' && !e.connected.has(k);
+    const stars = ['plaza', 'ruin', 'field'].includes(v.t) ? '' : `<g class="stars">${Array.from({ length: v.l }, (_, i) =>
+      `<path transform="translate(${(i - (v.l - 1) / 2) * 9},${S * 0.72}) scale(.55)" d="M0 -7 L2 -2 L7 -2 L3 1.5 L4.5 7 L0 4 L-4.5 7 L-3 1.5 L-7 -2 L-2 -2 Z" fill="#ffd34d" stroke="#7a5a10" stroke-width="1.2"/>`).join('')}</g>`;
+    return `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})"><g class="bld ${cls}${idle ? ' idle' : ''}">${buildingSvg(v, { farmed: v.t === 'field' ? e.farmed.has(k) : undefined })}</g>${stars}</g>`;
+  }).join('');
+  justBuilt = null; justUpgraded = null;
+
+  // Where can I build? Pending ghost? Selection?
+  let over = '', marks = '';
+  if (tool) {
+    for (const k of Object.keys(G.terrain)) {
+      if (placeProblem(G, k, tool)) continue;
+      const { x, y } = px(k);
+      over += `<polygon class="spot${pending === k ? ' pending' : ''}" points="${hexPoints(x, y, S - 3)}"/>`;
+    }
+    if (pending) {
+      const { x, y } = px(pending);
+      let ghost = '';
+      if (tool === 'road') ghost = '<circle r="8" fill="#e3cc9c"/>';
+      else {
+        const tmp = structuredClone(G);
+        tmp.actions = 0;
+        build(tmp, pending, tool);
+        ghost = buildingSvg(tmp.b[pending]);
+      }
+      marks += `<g transform="translate(${x},${y})" class="ghosting">${ghost}</g>`;
+    }
   }
-  acts += '<button class="btn ghost" id="aMenu" style="margin-left:auto">Menu</button>';
-  $('actions').innerHTML = acts;
+  if (sel) {
+    const { x, y } = px(sel);
+    marks += `<polygon class="sel-ring" points="${hexPoints(x, y, S - 1)}"/>`;
+  }
+  $('overlay').innerHTML = over;
+  $('marks').innerHTML = marks;
 
-  const hasDock = bestDockLevel(S) > 0;
-  $('hand').innerHTML = S.offers.map((t, i) =>
-    `<button class="card${selCard === i ? ' on' : ''}" data-i="${i}"${S.over ? ' disabled' : ''}><span class="ci">${cardSvg(t)}</span><span class="cn">${TILES[t].name}</span></button>`).join('')
-    + `<button class="btn fishbtn" id="aFish"${canFish(S) ? '' : ' disabled'} title="${!hasDock ? 'Build a dock first' : S.fished ? 'Again tomorrow' : 'Go fishing'}"><span>🎣</span>${S.fished ? 'tomorrow' : 'fish'}</button>`;
+  renderPanel(e);
+}
 
-  $('hand').querySelectorAll<HTMLButtonElement>('.card').forEach(b => {
+function renderPanel(e: ReturnType<typeof economy>): void {
+  const info = $('info');
+  const tools = $('tools');
+  if (G.over) {
+    info.innerHTML = `Game over! Your score: <b>${score(G)}</b>.`;
+    tools.innerHTML = '<div class="actions"><button class="btn" id="aNew">New island</button><button class="btn ghost" id="aMenu" style="margin-left:auto">Menu</button></div>';
+    $('aNew').onclick = () => { G = newGame(); void saveGame(G); gameScreen(); };
+    $('aMenu').onclick = () => startScreen(false);
+    return;
+  }
+
+  // A building tool is picked.
+  if (tool) {
+    const B = BUILDINGS[tool];
+    info.innerHTML = hint ? `<span class="warn-text">${esc(hint)}</span>`
+      : pending ? `Build a <b>${B.name}</b> here? ${pendingPreview(pending, tool)} Tap again or press Build.`
+      : `<b>${B.name}</b> ${costHtml(buildCost(tool))}<br>${B.info} Tap a green spot.`;
+    tools.innerHTML = `<div class="actions">${pending ? '<button class="btn" id="aBuild">Build</button>' : ''}<button class="btn ghost" id="aDone">${tool === 'road' ? 'Done' : 'Cancel'}</button></div>`;
+    document.getElementById('aBuild')?.addEventListener('click', () => { if (pending) void doBuild(pending); });
+    $('aDone').onclick = () => { play('tap'); tool = null; pending = null; hint = ''; render(); };
+    return;
+  }
+
+  // Something on the island is selected.
+  if (sel) {
+    const v = G.b[sel];
+    if (!v) {
+      const T = TERRAIN_INFO[terrainAt(G, sel)];
+      info.innerHTML = `<b>${T.name}</b>: ${T.info}`;
+      tools.innerHTML = buildMenu();
+      wireBuildMenu();
+      return;
+    }
+    const B = BUILDINGS[v.t];
+    const lvl = ['plaza', 'road', 'ruin', 'field'].includes(v.t) ? '' : ` (level ${v.l})`;
+    const notes: string[] = [];
+    if (v.t !== 'plaza' && v.t !== 'road' && !e.connected.has(sel)) notes.push('<span class="warn-text">No path leads here, so it does not work.</span>');
+    if (v.t === 'field' && !e.farmed.has(sel)) notes.push('<span class="warn-text">No farm looks after this field. Build or upgrade a farm close by.</span>');
+    const y = e.perTile[sel];
+    if (y) notes.push(`Makes ${formatYield(y)} a night.`);
+    if (v.t === 'dock') notes.push(`Boats: ${(v.boats ?? []).length} of ${v.l}.`);
+    info.innerHTML = `<b>${B.name}${lvl}</b>: ${B.info} ${notes.join(' ')}`;
+    let html = '<div class="actions">';
+    const c = upgradeCost(v);
+    if (c) {
+      const p = upgradeProblem(G, sel);
+      html += `<button class="btn" id="aUp"${p ? ' disabled' : ''}>${v.t === 'ruin' ? 'Fix' : 'Upgrade'} ${costHtml(c)}</button>`;
+    }
+    if (v.t === 'dock' && canFish(G)) html += '<button class="btn" id="aFish">🎣 Fish</button>';
+    html += '<button class="btn ghost" id="aClose" style="margin-left:auto">Close</button></div>';
+    if (v.t === 'dock') {
+      html += `<div class="boats">${BOATS.map(b => {
+        const bi = CONFIG.boats[b];
+        const p = boatProblem(G, sel!, b);
+        return `<button class="boat-btn" data-b="${b}"${p ? ` disabled title="${esc(p)}"` : ''}><svg viewBox="-18 -32 36 40" aria-hidden="true">${boatSvg(b)}</svg><span class="boat-name"><b>${bi.name}</b><br>+${bi.food}🐟${bi.pearls ? ` +${bi.pearls}🦪` : ''} a night</span><span class="boat-cost">${v.l < bi.dock ? `dock level ${bi.dock}` : costHtml(bi.cost)}</span></button>`;
+      }).join('')}</div>`;
+    }
+    tools.innerHTML = html;
+    document.getElementById('aUp')?.addEventListener('click', () => { if (sel) void doUpgrade(sel); });
+    document.getElementById('aFish')?.addEventListener('click', fish);
+    $('aClose').onclick = () => { play('tap'); sel = null; render(); };
+    tools.querySelectorAll<HTMLButtonElement>('.boat-btn').forEach(b => {
+      b.onclick = () => { if (sel) void doBoat(sel, b.dataset.b as BoatType); };
+    });
+    return;
+  }
+
+  info.innerHTML = hint ? `<span class="warn-text">${esc(hint)}</span>` : built ? `<b>${built}</b> Pick the next thing to build, or tap a building to upgrade it.` : 'Pick something to build, or tap your island to look at it.';
+  built = '';
+  tools.innerHTML = buildMenu();
+  wireBuildMenu();
+}
+
+function pendingPreview(k: string, t: BuildableType): string {
+  if (t === 'road') return 'Paths connect buildings to the town square.';
+  if (t === 'house') return 'Home for 2 more people.';
+  if (t === 'farm') return 'Looks after 2 fields close by.';
+  if (t === 'tower') return '+3 defence.';
+  const tmp = structuredClone(G);
+  tmp.actions = 0;
+  tmp.res = { food: 999, wood: 999, stone: 999, pearls: 999 };
+  try { build(tmp, k, t); } catch { return ''; }
+  const e = economy(tmp);
+  if (t === 'field' && !e.farmed.has(k)) return '<span class="warn-text">No farm close by yet, so it will not grow food.</span>';
+  const y = e.perTile[k];
+  return y ? `It will make ${formatYield(y)} a night.` : '';
+}
+
+function buildMenu(): string {
+  return `<div class="buildbar">${BUILD_MENU.map(t => {
+    const c = buildCost(t);
+    const ok = canPay(G, c) && (t === 'road' || G.actions < CONFIG.actionsPerDay);
+    return `<button class="bmenu${ok ? '' : ' off'}" data-t="${t}"><span class="bi">${menuIcon(t)}</span><span class="bn">${BUILDINGS[t].name}</span><span class="bc">${costHtml(c)}</span></button>`;
+  }).join('')}</div>`;
+}
+function wireBuildMenu(): void {
+  $('tools').querySelectorAll<HTMLButtonElement>('.bmenu').forEach(b => {
     b.onclick = () => {
       if (busy) return;
-      const i = Number(b.dataset.i);
-      selCard = selCard === i ? null : i; pending = null; selTile = null; flash = {};
-      play(selCard === null ? 'tap' : 'select'); tap(); render();
+      tool = b.dataset.t as BuildableType; pending = null; sel = null; hint = '';
+      play('select'); tap(); render();
     };
-  });
-  $('aFish').onclick = fish;
-  $('aMenu').onclick = () => { play('tap'); startScreen(true); };
-  document.getElementById('aPlace')?.addEventListener('click', () => { if (pending) void doPlace(pending); });
-  document.getElementById('aCancel')?.addEventListener('click', () => { play('tap'); pending = null; render(); });
-  document.getElementById('aUp')?.addEventListener('click', () => {
-    if (selTile && upgrade(S, selTile)) { play('upgrade'); tap(true); justUpgraded = selTile; void saveGame(S); render(); }
-  });
-  $('board').querySelectorAll<SVGGElement>('g[data-k]').forEach(g => {
-    g.addEventListener('click', () => {
-      if (S.over || busy) return;
-      const k = g.dataset.k!;
-      const [q, r] = parse(k);
-      if (S.tiles[k]) { play('tap'); selTile = selTile === k ? null : k; selCard = null; pending = null; flash = {}; render(); return; }
-      if (cur && canPlace(S, q, r, cur)) {
-        if (pending === k) void doPlace(k);
-        else { play('tap'); pending = k; tap(); render(); }
-      } else if (cur) play('error');
-    });
   });
 }
 
@@ -379,6 +562,6 @@ function render(): void {
 (async () => {
   best = await loadBest();
   const saved = await loadGame();
-  S = saved ?? newGame();
-  startScreen(!!saved && !saved.over && saved.turn > 0);
+  G = saved ?? newGame();
+  startScreen(!!saved && !saved.over && (saved.day > 1 || saved.actions > 0 || Object.keys(saved.b).length > 1));
 })();
