@@ -1,7 +1,7 @@
 import { Preferences } from '@capacitor/preferences';
 import type { GameState } from './game/types';
 
-const SAVE = 'game-save';
+const SAVE = 'game-save-v3';
 const BEST = 'game-best';
 
 export async function loadGame(): Promise<GameState | null> {
@@ -9,7 +9,7 @@ export async function loadGame(): Promise<GameState | null> {
     const { value } = await Preferences.get({ key: SAVE });
     if (!value) return null;
     const s = JSON.parse(value) as GameState;
-    return s && s.version === 1 && s.tiles && s.res ? s : null;
+    return s && s.version === 3 && s.b && s.terrain && s.res && s.explorers ? s : null;
   } catch {
     return null;
   }
