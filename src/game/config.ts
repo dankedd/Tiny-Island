@@ -3,9 +3,9 @@ import type { BoatType, BuildableType, Cost, PirateShip } from './types';
 /** All balance numbers in one place, so tuning never means hunting through code. */
 export const CONFIG = {
   /** Size of the whole island, in tiles from its middle. You start near its coast. */
-  islandRadius: 10.5,
+  islandRadius: 12.5,
   /** How far the coast is from the town square, in tiles. */
-  coastFromStart: 3.6,
+  coastFromStart: 6,
   /** Tiles around the town square that are not in the clouds at the start. */
   startRadius: 6,
   /** How many cloud areas the rest of the island is split into. */
@@ -23,7 +23,7 @@ export const CONFIG = {
   fieldsPerFarmLevel: 2,
   farmReach: 2,
   maxLevel: 3,
-  start: { food: 12, wood: 12, stone: 8, pearls: 0 },
+  start: { food: 20, wood: 30, stone: 20, pearls: 0 },
   cost: {
     road: { stone: 1 },
     house: { wood: 3, stone: 2 },

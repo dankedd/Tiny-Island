@@ -17,7 +17,7 @@ import { GAME_NAME } from './game/brand';
 import type { BoatType, BuildableType, Cost, GameState, NightReport, Resources } from './game/types';
 import { tap } from './feedback';
 import { MISSIONS, checkMissions, currentMission, type Mission } from './game/missions';
-import { comic } from './comic';
+import { raidScene } from './raid';
 import { loadBest, loadGame, saveBest, saveGame } from './storage';
 import { ICONS, S, boatSvg, buildingSvg, cloudLayer, decorLayer, heroIsland, hexPoints, menuIcon, pathLayer, pirateShip, terrainLayer } from './art';
 import { musicOn, play, soundOn, toggleMusic, toggleSfx, unlockAudio } from './audio';
@@ -381,7 +381,7 @@ async function nightSequence(rep: NightReport): Promise<void> {
   await wait(fast ? 600 : 1400 + rep.yields.length * 80);
 
   if (rep.isStorm) {
-    await comic(rep, G.day - (rep.gameOver ? 0 : 1));
+    await raidScene(rep, Object.values(G.b).filter(v => v.t === 'tower').length);
     const far = WORLD() * 0.95;
     const near = S * Math.sqrt(3) * 4.2;
     const ships = rep.ships ?? ['sloop'];
@@ -527,8 +527,8 @@ function render(): void {
   // Where can I build? Pending ghost? Selection?
   let over = '', marks = '';
   if (tool) {
-    for (const k of Object.keys(G.terrain)) {
-      if (placeProblem(G, k, tool)) continue;
+    for (const k of Object.keys(G.region)) {
+      if (!isOpen(G, k) || placeProblem(G, k, tool)) continue;
       const { x, y } = px(k);
       over += `<polygon class="spot${pending === k ? ' pending' : ''}" points="${hexPoints(x, y, S - 3)}"/>`;
     }
@@ -647,7 +647,7 @@ function renderPanel(e: ReturnType<typeof economy>): void {
 
   info.innerHTML = hint ? `<span class="warn-text">${esc(hint)}</span>`
     : built ? `<b>${built}</b> Pick the next thing to build, or tap a building to upgrade it.`
-    : G.mission === 0 ? 'Welcome! You need <b>wood</b> first. Pick the <b>Lumber camp</b> and put it next to a forest.'
+    : G.mission === 0 ? 'Welcome to your island! Build anywhere on the open land. Connect buildings to the town square with paths so they work.'
     : 'Pick something to build, or tap your island. Tap the clouds to explore new land.';
   built = '';
   tools.innerHTML = buildMenu();
@@ -656,15 +656,16 @@ function renderPanel(e: ReturnType<typeof economy>): void {
 
 function pendingPreview(k: string, t: BuildableType): string {
   if (t === 'road') return 'Paths connect buildings to the town square.';
-  if (t === 'house') return 'Home for 2 more people.';
-  if (t === 'farm') return 'Looks after 2 fields close by.';
-  if (t === 'tower') return '+3 defence.';
   const tmp = structuredClone(G);
   tmp.actions = 0;
   tmp.res = { food: 999, wood: 999, stone: 999, pearls: 999 };
   try { build(tmp, k, t); } catch { return ''; }
   const e = economy(tmp);
+  if (t !== 'field' && !e.connected.has(k)) return '<span class="warn-text">No path leads here yet. Build a path to the town square so it works.</span>';
   if (t === 'field' && !e.farmed.has(k)) return '<span class="warn-text">No farm with room close by, so it will not grow food.</span>';
+  if (t === 'house') return 'Home for 2 more people.';
+  if (t === 'farm') return 'Looks after 2 fields close by.';
+  if (t === 'tower') return '+3 defence.';
   const y = e.perTile[k];
   return y ? `It will make ${formatYield(y)} a night.` : '';
 }

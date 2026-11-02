@@ -48,28 +48,31 @@ describe('start', () => {
       const s = newGame(seed);
       const land = Object.keys(s.terrain).filter(k => s.terrain[k] !== 'sea');
       expect(land.length, `seed ${seed}`).toBeGreaterThan(250);
-      expect(Object.keys(s.terrain).some(k => s.terrain[k] === 'sea' && distance(...parse(k)) <= 4), `seed ${seed}`).toBe(true);
+      expect(Object.keys(s.terrain).some(k => s.terrain[k] === 'sea' && distance(...parse(k)) <= CONFIG.startRadius + 1), `seed ${seed}`).toBe(true);
       expect(new Set(Object.values(s.region)).size, `seed ${seed}`).toBe(CONFIG.cloudAreas + 1);
       const open = land.filter(k => isOpen(s, k)).length;
-      expect(open, `seed ${seed}`).toBeGreaterThan(60);
+      expect(open, `seed ${seed}`).toBeGreaterThan(90);
       expect(open).toBeLessThan(land.length / 2);
     }
   });
 
-  it('only lets you build a lumber camp first, and missions unlock the rest', () => {
+  it('starts with the basic buildings, and missions unlock towers and docks', () => {
     const s = newGame(7);
-    s.res = { food: 50, wood: 50, stone: 50, pearls: 0 };
-    expect(placeProblem(s, '1,0', 'house')).toMatch(/unlock/);
-    const lumberSpot = Object.keys(s.terrain).find(k => !placeProblem(s, k, 'lumber'))!;
-    build(s, lumberSpot, 'lumber');
-    expect(checkMissions(s).length).toBe(1);
-    expect(s.unlocked).toContain('quarry');
-    expect(s.unlocked).not.toContain('house');
-    const quarrySpot = Object.keys(s.terrain).find(k => !placeProblem(s, k, 'quarry'))!;
-    build(s, quarrySpot, 'quarry');
-    checkMissions(s);
-    expect(s.unlocked).toEqual(expect.arrayContaining(['house', 'farm', 'field']));
-    expect(s.unlocked).not.toContain('dock');
+    for (const t of ['road', 'house', 'field', 'farm', 'lumber', 'quarry'] as const) {
+      expect(Object.keys(s.region).some(k => !placeProblem(s, k, t)), t).toBe(true);
+    }
+    expect(placeProblem(s, '1,0', 'tower')).toMatch(/unlock/);
+    expect(placeProblem(s, '1,0', 'dock')).toMatch(/unlock/);
+    const spot = Object.keys(s.region).find(k => !placeProblem(s, k, 'lumber'))!;
+    build(s, spot, 'lumber');
+    expect(checkMissions(s)[0].text).toMatch(/lumber/);
+  });
+
+  it('keeps a free round village area around the town square', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const t = makeIsland(seed);
+      for (const k of Object.keys(t)) if (distance(...parse(k)) <= 2) expect(t[k], `seed ${seed}`).toBe('grass');
+    }
   });
 
   it('unlocks the dock when a path reaches the sea', () => {
@@ -93,13 +96,14 @@ describe('start', () => {
 });
 
 describe('building', () => {
-  it('needs a path to the town square', () => {
+  it('can go anywhere, but only works once a path leads to it', () => {
     const s = flat();
-    expect(placeProblem(s, '1,0', 'house')).toBeNull();
-    expect(placeProblem(s, '3,0', 'house')).toMatch(/path/);
-    build(s, '1,0', 'road'); build(s, '2,0', 'road');
     expect(placeProblem(s, '3,0', 'house')).toBeNull();
+    build(s, '3,0', 'house');
+    expect(economy(s).connected.has('3,0')).toBe(false);
+    build(s, '1,0', 'road'); build(s, '2,0', 'road');
     expect(network(s).has('2,0')).toBe(true);
+    expect(economy(s).connected.has('3,0')).toBe(true);
   });
 
   it('costs resources and a building turn, but paths are free of turns', () => {
@@ -151,10 +155,9 @@ describe('economy', () => {
   it('lets fields near a farm work without a path of their own', () => {
     const s = flat();
     build(s, '1,0', 'farm');
-    expect(placeProblem(s, '3,0', 'field')).toBeNull();
-    expect(placeProblem(s, '4,0', 'field')).toMatch(/farm/);
-    build(s, '3,0', 'field');
+    build(s, '3,0', 'field'); build(s, '4,0', 'field');
     expect(economy(s).farmed.has('3,0')).toBe(true);
+    expect(economy(s).farmed.has('4,0')).toBe(false);
   });
 
   it('makes less when there are fewer people than jobs', () => {

@@ -54,9 +54,9 @@ export function makeIsland(seed: number): Record<string, Terrain> {
       t[key(q, r)] = distance(dq, dr) >= reach - 1 ? 'sea' : land > 0 ? 'grass' : 'sea';
     }
     // The town square and the tiles around it must be land, and the sea must be close.
-    const around = [[0, 0] as const, ...neighbours(0, 0)];
-    if (around.some(([q, r]) => t[key(q, r)] !== 'grass')) continue;
-    if (!Object.keys(t).some(k => t[k] === 'sea' && distance(...parse(k)) <= 4)) continue;
+    // A free round village area: everything within 3 tiles of the square is land.
+    if (gridCells(3).some(([q, r]) => t[key(q, r)] !== 'grass')) continue;
+    if (!Object.keys(t).some(k => t[k] === 'sea' && distance(...parse(k)) <= CONFIG.startRadius + 1)) continue;
     finishIsland(t, rng);
     return t;
   }
@@ -74,13 +74,13 @@ function finishIsland(t: Record<string, Terrain>, rng: Rng): void {
     let cur = start;
     for (let i = 0; i < n; i++) {
       t[cur] = kind;
-      const next = neighbours(...parse(cur)).map(([a, b]) => key(a, b)).filter(k => t[k] === 'grass' && distance(...parse(k)) >= 2);
+      const next = neighbours(...parse(cur)).map(([a, b]) => key(a, b)).filter(k => t[k] === 'grass' && distance(...parse(k)) >= 3);
       if (!next.length) break;
       cur = next[Math.floor(rng() * next.length)];
     }
   };
   // Always a small wood and a few rocks close to the town square, so the first camps fit.
-  const ring = Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) === 2).sort();
+  const ring = Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) === 3).sort();
   if (ring.length) {
     const f = ring[Math.floor(rng() * ring.length)];
     growFrom('forest', f, 3);
@@ -90,7 +90,7 @@ function finishIsland(t: Record<string, Terrain>, rng: Rng): void {
     if (far.length) growFrom('rocks', far[0], 2);
   }
   // Nature further away: clusters of forest and rocks.
-  const grass = () => Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) >= 3).sort();
+  const grass = () => Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) >= 4).sort();
   const grow = (kind: Terrain, clusters: number, size: [number, number]) => {
     for (let c = 0; c < clusters; c++) {
       const free = grass();
@@ -98,8 +98,8 @@ function finishIsland(t: Record<string, Terrain>, rng: Rng): void {
       growFrom(kind, free[Math.floor(rng() * free.length)], size[0] + Math.floor(rng() * (size[1] - size[0] + 1)));
     }
   };
-  grow('forest', 16, [3, 7]);
-  grow('rocks', 11, [2, 4]);
+  grow('forest', 22, [3, 7]);
+  grow('rocks', 15, [2, 4]);
 }
 
 /** Splits the land into cloud areas: area 0 around the town square, the rest in chunks. */
@@ -147,7 +147,7 @@ export function newGame(seed = Math.floor(Math.random() * 1e9)): GameState {
     open: [0],
     explorers: {},
     mission: 0,
-    unlocked: ['road', 'lumber'],
+    unlocked: ['road', 'house', 'field', 'farm', 'lumber', 'quarry'],
     stats: { won: 0, cleared: 0 },
     b: { '0,0': { t: 'plaza', l: 1 } },
     res: { ...CONFIG.start },
@@ -215,11 +215,6 @@ export function placeProblem(s: GameState, k: string, t: BuildableType): string 
   if (ter === 'sea') return 'You cannot build on the sea.';
   if (!isOpen(s, k)) return 'This land is still in the clouds. Explore it first.';
   if (ter === 'forest' || ter === 'rocks') return `You cannot build on ${ter}. Build next to it, or clear it first.`;
-  const net = network(s);
-  const nearFarm = t === 'field' && farmsInReach(s, k, net) > 0;
-  if (!touchesNetwork(k, net) && !nearFarm) {
-    return t === 'field' ? 'Put a field close to a farm, or next to a path.' : 'Build next to a path that leads to your town square.';
-  }
   switch (t) {
     case 'dock': if (ter !== 'beach' || countNb(s, k, 'sea') < 1) return 'A dock must be on the beach, next to the water.'; break;
     case 'lumber': if (countNb(s, k, 'forest') < 1) return 'A lumber camp must be next to a forest.'; break;
@@ -230,16 +225,6 @@ export function placeProblem(s: GameState, k: string, t: BuildableType): string 
   if (t !== 'road' && s.actions >= CONFIG.actionsPerDay) return 'No more building today. Sleep to start a new day.';
   if (!canPay(s, buildCost(t))) return `You need ${costText(buildCost(t))}.`;
   return null;
-}
-
-/** Farms with a path that are close enough to look after a field at `k`. */
-function farmsInReach(s: GameState, k: string, net: Set<string>): number {
-  const [q, r] = parse(k);
-  return Object.keys(s.b).filter(f => {
-    if (s.b[f].t !== 'farm' || !touchesNetwork(f, net)) return false;
-    const [fq, fr] = parse(f);
-    return distance(q - fq, r - fr) <= CONFIG.farmReach;
-  }).length;
 }
 
 /** Points the dock towards the open sea. */
@@ -359,7 +344,6 @@ export function clearProblem(s: GameState, k: string): string | null {
   if (!isOpen(s, k)) return 'This land is still in the clouds.';
   const need = ter === 'forest' ? 'lumber' : 'quarry';
   if (!Object.values(s.b).some(v => v.t === need)) return ter === 'forest' ? 'Build a lumber camp first, then your woodcutters can chop here.' : 'Build a quarry first, then your diggers can break rocks.';
-  if (!touchesNetwork(k, network(s))) return 'Build a path next to it first.';
   if (s.actions >= CONFIG.actionsPerDay) return 'No more building today.';
   const c = CONFIG.clear[ter].cost;
   if (!canPay(s, c)) return `You need ${costText(c)}.`;

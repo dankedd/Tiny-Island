@@ -28,18 +28,14 @@ export const MISSIONS: Mission[] = [
   {
     text: 'Build a lumber camp next to a forest',
     focus: 'lumber',
-    done: 'You can now build a quarry.',
     check: s => count(s, 'lumber') >= 1,
-    reward: {},
-    unlock: ['quarry'],
+    reward: { food: 2 },
   },
   {
     text: 'Build a quarry next to rocks',
     focus: 'quarry',
-    done: 'Houses, farms and fields are unlocked!',
     check: s => count(s, 'quarry') >= 1,
-    reward: { food: 2 },
-    unlock: ['house', 'farm', 'field'],
+    reward: { wood: 3 },
   },
   {
     text: 'Build a farm and 2 fields',
