@@ -1,34 +1,34 @@
-# Eilandrijk
+# Tiny Island
 
-Een rustige bouw- en puzzelgame voor de iPhone: leg tegels, upgrade gebouwen, vis in de baai en houd de Nevelrovers buiten.
-Gebouwd met TypeScript + Vite, en als iPhone-app verpakt met Capacitor.
+A calm island-building puzzle game for iPhone. Place tiles, upgrade buildings, go fishing and keep the Fog Pirates away.
+Built with TypeScript + Vite and packaged as an iPhone app with Capacitor.
 
-## Spelen in de browser (op elke computer)
+## Play in a browser (any computer)
 
 ```bash
 npm install
-npm run dev        # open de link die verschijnt, ook op je telefoon in hetzelfde wifi-netwerk
-npm test           # test de spelregels
+npm run dev        # open the link it prints, also on a phone on the same wifi
+npm test           # test the game rules
 ```
 
-## Mappen
+## Folders
 
-| Map | Wat erin staat |
+| Folder | What is in it |
 | --- | --- |
-| `src/game/` | Spelregels zonder schermcode: tegels, opbrengst, nachten, stormen, vissen. Alle balansgetallen staan in `config.ts`. |
-| `src/main.ts` | Schermen: startmenu, spelbord, nacht- en visvensters. |
-| `src/storage.ts` | Opslaan van het spel en het record (werkt op iPhone en in de browser). |
-| `ios/` | Het Xcode-project voor de iPhone. |
-| `tests/` | Tests van de spelregels. |
+| `src/game/` | Game rules without any screen code: tiles, yields, nights, pirates, fishing. All balance numbers live in `config.ts`. |
+| `src/main.ts` | Screens: start menu, board, night and fishing pop-ups. |
+| `src/storage.ts` | Saves the game and best score (works on iPhone and in the browser). |
+| `ios/` | The Xcode project for iPhone. |
+| `tests/` | Tests for the game rules. |
 
-## De iPhone-app bouwen (op een Mac)
+## Build the iPhone app (on a Mac)
 
-Nodig: een Mac met Xcode 16 of nieuwer en Node.js 20 of nieuwer.
+You need a Mac with Xcode 16 or newer and Node.js 20 or newer.
 
 1. `npm install`
-2. `npm run ios:sync` (bouwt het spel en zet het in het Xcode-project)
-3. `npm run ios:open` (opent Xcode)
-4. Kies in Xcode bij **Signing & Capabilities** je Apple-account als Team.
-5. Sluit een iPhone aan of kies een simulator en druk op de afspeelknop.
+2. `npm run ios:sync` (builds the game and copies it into the Xcode project)
+3. `npm run ios:open` (opens Xcode)
+4. In Xcode, under **Signing & Capabilities**, pick your Apple account as the Team.
+5. Plug in an iPhone or pick a simulator and press the play button.
 
-Voor de App Store is een Apple Developer-account nodig ($99 per jaar). Daarna: in Xcode **Product > Archive** en uploaden naar App Store Connect.
+Publishing on the App Store needs an Apple Developer account ($99 per year). Then in Xcode use **Product > Archive** and upload to App Store Connect.
