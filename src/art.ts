@@ -1,4 +1,5 @@
-import type { BoatType, Building, BuildingType, Terrain } from './game/types';
+import type { BoatType, Building, BuildingType, PirateShip, Terrain } from './game/types';
+import { distance, parse } from './game/hex';
 
 /**
  * All pictures are SVG drawn in code. The island is drawn as one landmass
@@ -55,18 +56,44 @@ const boulder = (x: number, y: number, k = 1, c = '#9a9ca1') => `<g transform="t
   <path d="M-1 -8 L6 -5 L9 4 L2 4 Z" fill="rgba(0,0,0,.16)"/>
   <path d="M-7 -4 L-1 -8 L-2 -2 Z" fill="rgba(255,255,255,.35)"/></g>`;
 
+const win = (x: number, y: number, w = 3.6) => `<rect x="${x}" y="${y}" width="${w}" height="${w}" rx=".5" fill="#ffd96b" stroke="#fff" stroke-width=".7"/><path d="M${x + w / 2} ${y} v${w} M${x} ${y + w / 2} h${w}" stroke="#c9a24a" stroke-width=".45"/>`;
+
+/** Chimney smoke: three puffs that drift up and fade. */
+export const smoke = (x: number, y: number) => `<g transform="translate(${x},${y})" class="smoke">${[0, 1, 2].map(i =>
+  `<circle r="${1.8 + i * 0.5}" fill="#f4f4f4" style="animation-delay:-${i}s"/>`).join('')}</g>`;
+
 const cottage = (x: number, y: number, k = 1, roof = '#d9534f', wall = '#fff4e2') => `
   <g transform="translate(${x},${y}) scale(${k})">
     ${shadow(11, 3, 8)}
     <rect x="-9" y="-5" width="18" height="13" rx="1" fill="${wall}"/>
     <rect x="-9" y="-5" width="18" height="2.5" fill="rgba(0,0,0,.06)"/>
+    <rect x="-9" y="6.5" width="18" height="1.5" fill="#c9b08a"/>
     <path d="M-11.5 -4 L0 -15 L11.5 -4 Z" fill="${roof}"/>
+    <path d="M-8.3 -7 L8.3 -7 M-5 -10 L5 -10 M-1.8 -13 L1.8 -13" stroke="rgba(0,0,0,.16)" stroke-width=".7"/>
     <path d="M0 -15 L11.5 -4 L6 -4 Z" fill="rgba(0,0,0,.14)"/>
-    <rect x="4.5" y="-15" width="3" height="6" fill="#9b6b49"/>
-    <rect x="-2.3" y="1" width="4.6" height="7" rx="2" fill="#8a5a36"/>
-    <rect x="-7" y="-1.5" width="3.6" height="3.6" rx=".6" fill="#ffd96b"/>
-    <rect x="3.4" y="-1.5" width="3.6" height="3.6" rx=".6" fill="#ffd96b"/>
+    <path d="M-11.5 -4 L11.5 -4" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
+    <rect x="4.5" y="-15" width="3" height="6" fill="#9b6b49"/><rect x="4" y="-15.8" width="4" height="1.4" fill="#7a5130"/>
+    ${smoke(6, -17)}
+    <rect x="-2.3" y="1" width="4.6" height="7" rx="2" fill="#8a5a36"/><circle cx="1.1" cy="4.6" r=".5" fill="#ffd34d"/>
+    ${win(-7, -1.5)}${win(3.4, -1.5)}
+    <rect x="-7.4" y="2.3" width="4.4" height="1.4" rx=".6" fill="#7a5130"/>
+    <circle cx="-6.6" cy="2" r=".9" fill="#ff7aa8"/><circle cx="-5.2" cy="1.8" r=".9" fill="#ffd34d"/><circle cx="-3.8" cy="2" r=".9" fill="#ff7aa8"/>
   </g>`;
+
+/** A tiny villager. `walk` makes them stroll back and forth. */
+export const person = (x: number, y: number, shirt = '#4f8fd0', walk = true, delay = 0) => `<g transform="translate(${x},${y})">
+  <g${walk ? ` class="walk" style="animation-delay:-${delay}s"` : ''}>
+    <ellipse cy=".6" rx="2.4" ry=".8" fill="rgba(0,0,0,.22)"/>
+    <rect x="-1.3" y="-2" width="1.1" height="2.6" fill="#5a4a3a"/><rect x=".2" y="-2" width="1.1" height="2.6" fill="#5a4a3a"/>
+    <rect x="-1.8" y="-6.2" width="3.6" height="4.6" rx="1.4" fill="${shirt}"/>
+    <circle cy="-7.8" r="2" fill="#f2c49b"/><path d="M-2 -8.3 Q0 -10.6 2 -8.3 Z" fill="#6b4226"/>
+  </g></g>`;
+
+const sheep = (x: number, y: number, flip = false) => `<g transform="translate(${x},${y})${flip ? ' scale(-1,1)' : ''}">
+  <ellipse cy="1.5" rx="4.5" ry="1.2" fill="rgba(0,0,0,.18)"/>
+  <rect x="-2.6" y="-1" width="1" height="2.6" fill="#333"/><rect x="1.4" y="-1" width="1" height="2.6" fill="#333"/>
+  <circle cx="-2" cy="-2.5" r="2.4" fill="#fff"/><circle cx="1" cy="-3" r="2.6" fill="#fff"/><circle cx="2.4" cy="-1.8" r="2" fill="#fff"/>
+  <ellipse cx="4.4" cy="-2.6" rx="1.5" ry="1.2" fill="#333"/></g>`;
 
 const crate = (x: number, y: number, k = 1) => `<g transform="translate(${x},${y}) scale(${k})"><rect x="-3" y="-3" width="6" height="6" fill="#b5834f"/><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="#8a5a36" stroke-width="1"/></g>`;
 
@@ -97,71 +124,126 @@ export function boatSvg(b: BoatType, k = 1): string {
 
 const GRASS = ['#86c96f', '#81c46b', '#8acd73'];
 
+const palm = (x: number, y: number, k = 1, flip = false) => `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) scale(${flip ? -k : k},${k})">
+  ${shadow(9, 2.4, 3)}
+  <path d="M0 2 Q2 -8 5 -17" stroke="#9b6b49" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+  <path d="M0 2 Q2 -8 5 -17" stroke="#7a5130" stroke-width="2.6" stroke-dasharray="1 2.2" fill="none"/>
+  <g transform="translate(5,-17)">
+    <path d="M0 0 Q-7 -5 -13 1 Q-7 -2 0 0Z" fill="#3f9a5c"/><path d="M0 0 Q7 -6 13 0 Q6 -2 0 0Z" fill="#46a352"/>
+    <path d="M0 0 Q-3 -9 -9 -10 Q-3 -6 0 0Z" fill="#58a845"/><path d="M0 0 Q4 -9 10 -9 Q4 -5 0 0Z" fill="#3f9a5c"/>
+    <circle cx="-1" cy="1" r="1.4" fill="#7a5130"/><circle cx="1.2" cy="1.4" r="1.4" fill="#6b4226"/>
+  </g></g>`;
+
+const bush = (x: number, y: number, k = 1) => `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) scale(${k.toFixed(2)})">
+  <ellipse cy="2" rx="6" ry="1.8" fill="rgba(20,40,20,.18)"/>
+  <circle cx="-3" cy="-1" r="3.4" fill="#4a9e48"/><circle cx="2.5" cy="-1.2" r="3.6" fill="#4f9f4a"/><circle cx="0" cy="-3.4" r="3.4" fill="#5fb655"/>
+  <circle cx="-1" cy="-4.4" r="1.2" fill="rgba(255,255,255,.25)"/></g>`;
+
+const FLOWERS = ['#fff', '#ffd34d', '#ff8fb1', '#b7a6ff'];
+
+/** The ground, forests and rocks. These never change during a game, so they are drawn once. */
 export function terrainLayer(terrain: Record<string, Terrain>, toPixel: (k: string) => { x: number; y: number }): string {
-  let cliffs = '', foam = '', ground = '', nature = '';
+  let shallow = '', cliffs = '', foam = '', ground = '', nature = '';
   const land = Object.entries(terrain).filter(([, t]) => t !== 'sea');
   for (const [k, t] of land) {
     const { x, y } = toPixel(k);
-    foam += `<polygon points="${hexPoints(x, y + 3, S + 7)}" class="foam"/>`;
+    shallow += `<polygon points="${hexPoints(x, y + 4, S + 24)}"/>`;
+    foam += `<polygon points="${hexPoints(x, y + 3, S + 8)}" class="foam"/>`;
     cliffs += `<polygon points="${hexPoints(x, y + 7, S + 0.8)}" fill="#c9a66b"/>`;
     const rnd = cellRand(k);
-    const fill = t === 'beach' ? '#f1d9a0' : t === 'rocks' ? '#b9b4a6' : GRASS[Math.floor(rnd() * 3)];
+    const fill = t === 'beach' ? '#f1d9a0' : t === 'rocks' ? '#b9b4a6' : t === 'forest' ? '#6fb35e' : GRASS[Math.floor(rnd() * 3)];
     ground += `<polygon points="${hexPoints(x, y, S + 0.8)}" fill="${fill}"/>`;
-    if (t === 'grass' && rnd() < 0.6) {
-      for (let i = 0; i < 3; i++) {
-        const gx = x + (rnd() - 0.5) * S * 1.2, gy = y + (rnd() - 0.5) * S * 1.1;
-        ground += `<path d="M${gx.toFixed(1)} ${gy.toFixed(1)} l-2 -4 M${gx.toFixed(1)} ${gy.toFixed(1)} l0 -5 M${gx.toFixed(1)} ${gy.toFixed(1)} l2 -4" stroke="#6aae57" stroke-width="1.2" stroke-linecap="round"/>`;
-      }
-    }
-    if (t === 'beach' && rnd() < 0.4) ground += `<circle cx="${(x + (rnd() - 0.5) * S).toFixed(1)}" cy="${(y + (rnd() - 0.5) * S).toFixed(1)}" r="1.6" fill="#fff6e0"/>`;
     if (t === 'forest') {
-      const n = 5 + Math.floor(rnd() * 3);
+      const n = 6 + Math.floor(rnd() * 3);
       const trees: [number, number, number, number][] = [];
-      for (let i = 0; i < n; i++) trees.push([x + (rnd() - 0.5) * S * 1.3, y + (rnd() - 0.5) * S * 1.2 + 4, 1.05 + rnd() * 0.45, Math.floor(rnd() * 3)]);
+      for (let i = 0; i < n; i++) trees.push([x + (rnd() - 0.5) * S * 1.35, y + (rnd() - 0.5) * S * 1.2 + 4, 1.05 + rnd() * 0.45, Math.floor(rnd() * 4)]);
       trees.sort((a, b) => a[1] - b[1]);
-      nature += trees.map(([tx, ty, tk, tone]) => tree(tx, ty, tk, tone)).join('');
+      nature += trees.map(([tx, ty, tk, tone]) => tone === 3 ? roundTree(tx, ty, tk * 1.1) : tree(tx, ty, tk, tone)).join('');
+      if (rnd() < 0.35) nature += `<g transform="translate(${(x + (rnd() - 0.5) * S).toFixed(1)},${(y + S * 0.45).toFixed(1)})"><rect x="-.8" y="-2" width="1.6" height="2.4" fill="#f4efe6"/><path d="M-2.6 -1.8 Q0 -5 2.6 -1.8 Z" fill="#e0604f"/><circle cx="-.8" cy="-3" r=".5" fill="#fff"/></g>`;
     }
     if (t === 'rocks') {
+      for (let i = 0; i < 4; i++) ground += `<circle cx="${(x + (rnd() - 0.5) * S * 1.3).toFixed(1)}" cy="${(y + (rnd() - 0.5) * S * 1.2).toFixed(1)}" r="${(1 + rnd() * 1.4).toFixed(1)}" fill="#a29d90"/>`;
+      ground += `<ellipse cx="${(x + (rnd() - 0.5) * S * 0.6).toFixed(1)}" cy="${(y + S * 0.35).toFixed(1)}" rx="9" ry="3" fill="#8fbf6a" opacity=".6"/>`;
       const n = 3 + Math.floor(rnd() * 2);
-      const rocks: [number, number, number][] = [];
-      for (let i = 0; i < n; i++) rocks.push([x + (rnd() - 0.5) * S * 1.2, y + (rnd() - 0.5) * S * 1.1, 0.9 + rnd() * 0.7]);
+      const rocks: [number, number, number, string][] = [];
+      for (let i = 0; i < n; i++) rocks.push([x + (rnd() - 0.5) * S * 1.2, y + (rnd() - 0.5) * S * 1.1, 0.9 + rnd() * 0.75, ['#9a9ca1', '#a7a39a', '#8e9196'][Math.floor(rnd() * 3)]]);
       rocks.sort((a, b) => a[1] - b[1]);
-      nature += rocks.map(([rx, ry, rk]) => boulder(rx, ry, rk)).join('');
+      nature += rocks.map(([rx, ry, rk, c]) => boulder(rx, ry, rk, c)).join('');
     }
   }
-  return `<g class="terrain"><g class="foamring">${foam}</g>${cliffs}${ground}</g><g class="nature">${nature}</g>`;
+  return `<g class="terrain"><g class="shallow">${shallow}</g><g class="foamring">${foam}</g>${cliffs}${ground}</g><g class="nature">${nature}</g>`;
+}
+
+/** Small things on open grass and sand: tufts, flowers, bushes, palms and shells. Hidden under buildings. */
+export function decorLayer(terrain: Record<string, Terrain>, built: Set<string>, toPixel: (k: string) => { x: number; y: number }): string {
+  let flat = '', tall = '';
+  for (const [k, t] of Object.entries(terrain)) {
+    if ((t !== 'grass' && t !== 'beach') || built.has(k)) continue;
+    const { x, y } = toPixel(k);
+    const rnd = cellRand(k + '#');
+    const at = (spread = 1.1) => [x + (rnd() - 0.5) * S * spread, y + (rnd() - 0.5) * S * spread] as const;
+    if (t === 'grass') {
+      for (let i = 0; i < 3; i++) {
+        const [gx, gy] = at(1.2);
+        flat += `<path d="M${gx.toFixed(1)} ${gy.toFixed(1)} l-2 -4 M${gx.toFixed(1)} ${gy.toFixed(1)} l0 -5 M${gx.toFixed(1)} ${gy.toFixed(1)} l2 -4" stroke="#6aae57" stroke-width="1.2" stroke-linecap="round"/>`;
+      }
+      if (rnd() < 0.55) {
+        const c = FLOWERS[Math.floor(rnd() * FLOWERS.length)];
+        const [fx, fy] = at(1);
+        for (let i = 0; i < 4; i++) flat += `<circle cx="${(fx + (rnd() - 0.5) * 12).toFixed(1)}" cy="${(fy + (rnd() - 0.5) * 8).toFixed(1)}" r="1.5" fill="${c}"/>`;
+      }
+      if (rnd() < 0.3) { const [bx, by] = at(1); tall += bush(bx, by, 0.9 + rnd() * 0.4); }
+    } else {
+      for (let i = 0; i < 2; i++) {
+        const [rx, ry] = at(1);
+        flat += `<path d="M${(rx - 6).toFixed(1)} ${ry.toFixed(1)} q3 -2 6 0 t6 0" stroke="#e2c487" stroke-width="1" fill="none"/>`;
+      }
+      if (rnd() < 0.5) { const [sx, sy] = at(1); flat += `<path d="M${sx.toFixed(1)} ${sy.toFixed(1)} l-2.2 -3 q2.2 -2 4.4 0 Z" fill="#ffd6c9" stroke="#e8a998" stroke-width=".5"/>`; }
+      if (rnd() < 0.3) { const [px, py] = at(0.8); tall += palm(px, py, 1 + rnd() * 0.3, rnd() < 0.5); }
+    }
+  }
+  return `<g>${flat}</g><g>${tall}</g>`;
 }
 
 // ---------- paths ----------
 
-/** Path segments: from each path tile to its neighbours that are paths, the square or buildings. */
+/**
+ * Paths: path tiles join up with each other and the town square,
+ * and every building gets one short path to the nearest path tile (or the square).
+ */
 export function pathLayer(
-  b: Record<string, Building>, neighboursOf: (k: string) => string[], toPixel: (k: string) => { x: number; y: number },
+  b: Record<string, Building>, neighboursOf: (k: string) => string[], toPixel: (k: string) => { x: number; y: number }, net: Set<string>,
 ): string {
   let base = '', top = '';
-  const seg = (a: { x: number; y: number }, c: { x: number; y: number }, half: boolean) => {
-    const ex = half ? (a.x + c.x) / 2 : c.x, ey = half ? (a.y + c.y) / 2 : c.y;
+  const seg = (a: { x: number; y: number }, c: { x: number; y: number }, part = 1) => {
+    const ex = a.x + (c.x - a.x) * part, ey = a.y + (c.y - a.y) * part;
     const d = `M${a.x.toFixed(1)} ${a.y.toFixed(1)} L${ex.toFixed(1)} ${ey.toFixed(1)}`;
     base += `<path d="${d}"/>`;
     top += `<path d="${d}"/>`;
   };
+  const home = (k: string) => distance(...parse(k));
   for (const [k, v] of Object.entries(b)) {
-    if (v.t === 'plaza') {
-      // Short paths from the town square to buildings right next to it.
+    if (v.t === 'road') {
       const p = toPixel(k);
-      for (const n of neighboursOf(k)) if (b[n] && b[n].t !== 'road') seg(p, toPixel(n), true);
+      base += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="8"/>`;
+      top += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5.5"/>`;
+      for (const n of neighboursOf(k)) {
+        if (b[n]?.t === 'road' && k < n) seg(p, toPixel(n));
+        if (b[n]?.t === 'plaza') seg(p, toPixel(n), 0.62);
+      }
       continue;
     }
-    if (v.t !== 'road') continue;
-    const p = toPixel(k);
-    base += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="8"/>`;
-    top += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5.5"/>`;
-    for (const n of neighboursOf(k)) {
-      const nv = b[n];
-      if (!nv) continue;
-      if (nv.t === 'road') { if (k < n) seg(p, toPixel(n), false); }
-      else seg(p, toPixel(n), nv.t !== 'plaza');
-    }
+    if (v.t === 'plaza' || v.t === 'field') continue;
+    // One path per building: to the connected path tile closest to the square.
+    const options = neighboursOf(k).filter(n => b[n]?.t === 'road' || b[n]?.t === 'plaza');
+    if (!options.length) continue;
+    options.sort((x, y) => Number(net.has(y)) - Number(net.has(x)) || home(x) - home(y) || (x < y ? -1 : 1));
+    const n = options[0];
+    const from = toPixel(n), to = toPixel(k);
+    if (b[n].t === 'plaza') {
+      const st = { x: from.x + (to.x - from.x) * 0.36, y: from.y + (to.y - from.y) * 0.36 };
+      seg(st, to, 0.55);
+    } else seg(from, to, 0.62);
   }
   return `<g class="path-base">${base}</g><g class="path-top">${top}</g>`;
 }
@@ -172,29 +254,79 @@ const DIR_ANGLE = [0, -60, -120, 180, 120, 60]; // degrees for the six hex neigh
 
 const BIG: BuildingType[] = ['house', 'farm', 'lumber', 'quarry', 'tower', 'ruin'];
 
-export function buildingSvg(v: Building, opts: { farmed?: boolean; idle?: boolean } = {}): string {
+export interface ArtOpts {
+  farmed?: boolean;
+  /** Fields only: which of the six neighbours (hex.DIRS order) are fields too, so they join up. */
+  joins?: boolean[];
+  /** Show villagers walking around (off for menu icons and previews). */
+  life?: boolean;
+}
+
+export function buildingSvg(v: Building, opts: ArtOpts = {}): string {
   const art = buildingArt(v, opts);
   return BIG.includes(v.t) ? `<g transform="scale(1.4)">${art}</g>` : art;
 }
 
-function buildingArt(v: Building, opts: { farmed?: boolean; idle?: boolean }): string {
+const SHIRTS = ['#4f8fd0', '#e0604f', '#f0a830', '#6fb37a', '#a77bd1'];
+
+function fieldArt(farmed: boolean, joins: boolean[]): string {
+  const soil = farmed ? '#9b7a4c' : '#b0946a';
+  const leaf = farmed ? '#6fae55' : '#a39360';
+  const crop = farmed ? '#e7c64f' : '#c2ab72';
+  let g = `<polygon points="${hexPoints(0, 0, S + 0.8)}" fill="${soil}"/>`;
+  // Rows line up with the rows of the fields next door, so joined fields look like one big field.
+  const halfW = (y: number) => (Math.abs(y) <= S / 2 ? (S * Math.sqrt(3)) / 2 : (S - Math.abs(y)) * Math.sqrt(3));
+  const sp = (S * Math.sqrt(3)) / 12;
+  for (let i = -5; i <= 5; i++) {
+    const y = i * 7.5;
+    const w = halfW(y) - 0.5;
+    if (w < 3) continue;
+    g += `<path d="M${(-w).toFixed(1)} ${y} L${w.toFixed(1)} ${y}" stroke="${leaf}" stroke-width="4.4"/>`;
+    for (let j = -6; j <= 6; j++) {
+      const x = j * sp + (i % 2 ? sp / 2 : 0);
+      if (Math.abs(x) < w - 1.5) g += `<circle cx="${x.toFixed(1)}" cy="${y - 1.6}" r="1.9" fill="${crop}"/>`;
+    }
+  }
+  // A little fence on every side that does not touch another field.
+  for (let i = 0; i < 6; i++) {
+    const d = (6 - i) % 6;
+    if (joins[d]) continue;
+    const a1 = (Math.PI / 180) * (60 * i - 30), a2 = (Math.PI / 180) * (60 * i + 30);
+    const r = S - 2;
+    const x1 = r * Math.cos(a1), y1 = r * Math.sin(a1), x2 = r * Math.cos(a2), y2 = r * Math.sin(a2);
+    g += `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} L${x2.toFixed(1)} ${y2.toFixed(1)}" stroke="#8a5a36" stroke-width="1.4"/>`;
+    for (let t = 0; t <= 4; t++) {
+      const px = x1 + ((x2 - x1) * t) / 4, py = y1 + ((y2 - y1) * t) / 4;
+      g += `<rect x="${(px - 0.9).toFixed(1)}" y="${(py - 3.2).toFixed(1)}" width="1.8" height="3.8" fill="#7a5130"/>`;
+    }
+  }
+  if (!farmed) g += `<g transform="translate(0,-4)"><circle r="9" fill="#fff" stroke="#e0604f" stroke-width="2"/><text y="4" text-anchor="middle" font-size="12" font-weight="800" fill="#e0604f">!</text></g>`;
+  return g;
+}
+
+function buildingArt(v: Building, opts: ArtOpts): string {
   const l = v.l;
+  const life = opts.life ?? false;
   switch (v.t) {
     case 'plaza':
       return `<circle r="${S * 0.62}" fill="#d9c9a3"/><circle r="${S * 0.62}" fill="none" stroke="#bfae86" stroke-width="2"/>
         ${Array.from({ length: 10 }, (_, i) => { const a = i / 10 * Math.PI * 2; return `<circle cx="${(Math.cos(a) * S * 0.42).toFixed(1)}" cy="${(Math.sin(a) * S * 0.42).toFixed(1)}" r="2.2" fill="#c8b68e"/>`; }).join('')}
         ${shadow(10, 3.5, 5)}<circle r="9" fill="#9aa3ad"/><circle r="6.5" fill="#6fb7d6"/><circle cx="-2" cy="-2" r="2" fill="#bfe6f5"/>
-        ${flag(14, -6, '#ffd34d')}`;
+        <circle r="1.6" fill="#fff" class="fountain"/>
+        <g transform="translate(-15,-12)">${shadow(8, 2, 6)}<rect x="-7" y="-2" width="14" height="8" fill="#c9a66b"/><path d="M-8 -2 L8 -2 L7 -7 L-7 -7 Z" fill="#e0604f"/><path d="M-4.5 -7 L-4 -2 M0 -7 L0 -2 M4.5 -7 L4 -2" stroke="#fff" stroke-width="2.2"/><circle cx="-3" cy="-3.4" r="1.4" fill="#ff9f43"/><circle cx="2" cy="-3.4" r="1.4" fill="#7bd36b"/></g>
+        <g transform="translate(-14,14)"><rect x="-5" y="-1" width="10" height="2" fill="#8a5a36"/><rect x="-4" y="1" width="1" height="2" fill="#5a3a20"/><rect x="3" y="1" width="1" height="2" fill="#5a3a20"/></g>
+        ${flag(14, -6, '#ffd34d')}
+        ${life ? person(12, 14, SHIRTS[1], true, 1) + person(-4, 18, SHIRTS[2], true, 2.5) + person(-18, -3, SHIRTS[3], false) : ''}`;
     case 'road':
       return '';
     case 'house':
-      if (l === 1) return cottage(0, 2, 1.45);
-      if (l === 2) return cottage(-10, -2, 1.15) + cottage(9, 7, 1.15, '#4f8fd0');
+      if (l === 1) return cottage(0, 2, 1.45) + (life ? person(11, 13, SHIRTS[0], true) : '') + bush(-14, 12, 0.7);
+      if (l === 2) return cottage(-10, -2, 1.15) + cottage(9, 7, 1.15, '#4f8fd0') + (life ? person(-6, 14, SHIRTS[4], true, 1.5) : '');
       return `<g transform="translate(-4,4) scale(1.3)">${shadow(13, 3.5, 9)}
         <rect x="-10" y="-17" width="20" height="26" rx="1" fill="#fff4e2"/>
         <path d="M-12.5 -16 L0 -27 L12.5 -16 Z" fill="#d9534f"/><path d="M0 -27 L12.5 -16 L7 -16 Z" fill="rgba(0,0,0,.14)"/>
         ${[-12, -4, 4].map(yy => `<rect x="-7" y="${yy}" width="4" height="4" fill="#ffd96b"/><rect x="3" y="${yy}" width="4" height="4" fill="#ffd96b"/>`).join('')}
-        <rect x="-2.5" y="2" width="5" height="7" rx="2" fill="#8a5a36"/></g>${roundTree(16, 10, 1.1)}`;
+        <rect x="-2.5" y="2" width="5" height="7" rx="2" fill="#8a5a36"/>${smoke(5, -28)}</g>${roundTree(16, 10, 1.1)}${life ? person(-14, 16, SHIRTS[2], true, 0.7) + person(4, 18, SHIRTS[0], true, 2) : ''}`;
     case 'farm': {
       let g = `<g transform="translate(-4,2) scale(1.3)">${shadow(14, 3.5, 9)}
         <rect x="-11" y="-6" width="22" height="15" fill="#c9553f"/>
@@ -203,22 +335,14 @@ function buildingArt(v: Building, opts: { farmed?: boolean; idle?: boolean }): s
         <rect x="-9" y="-3" width="4" height="3" fill="#f4e3c8"/></g>`;
       if (l >= 2) g += `<g transform="translate(17,0) scale(1.2)">${shadow(5, 2, 9)}<rect x="-4" y="-14" width="8" height="23" rx="4" fill="#d8dde3"/><path d="M-4 -12 Q0 -19 4 -12" fill="#9aa3ad"/><rect x="-4" y="-4" width="8" height="1.5" fill="#b5bcc4"/></g>`;
       if (l >= 3) g += `<g transform="translate(-20,-8)"><rect x="-3" y="-6" width="6" height="16" fill="#f4e3c8"/><path d="M-4 -6 L0 -11 L4 -6 Z" fill="#8a3a2c"/><g transform="translate(0,-7)"><g class="spin"><rect x="-1.2" y="-13" width="2.4" height="26" fill="#7a5130"/><rect x="-13" y="-1.2" width="26" height="2.4" fill="#7a5130"/></g></g><circle cx="0" cy="-7" r="2" fill="#5a3a20"/></g>`;
-      g += `<g transform="translate(10,14)"><ellipse rx="5" ry="3" fill="#fff"/><circle cx="4" cy="-1" r="2.2" fill="#fff"/><circle cx="-2" cy="-1" r="1.4" fill="#333"/></g>`;
+      g += `<g transform="translate(10,14)"><ellipse cy="2.6" rx="6" ry="1.4" fill="rgba(0,0,0,.18)"/><rect x="-3.5" y="0" width="1.2" height="3" fill="#333"/><rect x="2.3" y="0" width="1.2" height="3" fill="#333"/><ellipse rx="5" ry="3" fill="#fff"/><circle cx="4.6" cy="-1.4" r="2.2" fill="#fff"/><circle cx="-2" cy="-1" r="1.4" fill="#333"/><circle cx="1.5" cy="1" r="1.1" fill="#333"/><circle cx="5.4" cy="-1.8" r=".5" fill="#333"/></g>`;
+      g += `<g transform="translate(-16,12)"><rect x="-4" y="-3" width="8" height="5" fill="#e7c64f"/><path d="M-4 -1 h8 M-4 1 h8" stroke="#c9a33a" stroke-width=".6"/></g>`;
+      if (l >= 2) g += sheep(-3, 22) + sheep(-12, 21, true);
+      if (life) g += person(18, 14, SHIRTS[3], true, 0.4);
       return g;
     }
-    case 'field': {
-      const crop = opts.farmed === false ? '#b59a5a' : '#e7c64f';
-      const leaf = opts.farmed === false ? '#9c8a5e' : '#7bb661';
-      let g = `<polygon points="${hexPoints(0, 0, S * 0.86)}" fill="${opts.farmed === false ? '#a98b5c' : '#9b7a4c'}"/>`;
-      for (let i = -3; i <= 3; i++) {
-        const y = i * 8;
-        const w = Math.sqrt(Math.max(0, (S * 0.78) ** 2 - y * y)) * 0.95;
-        g += `<path d="M${-w} ${y} L${w} ${y}" stroke="${leaf}" stroke-width="4" stroke-linecap="round"/>`;
-        for (let x = -w + 3; x <= w - 3; x += 6) g += `<circle cx="${x.toFixed(1)}" cy="${y - 1.5}" r="2" fill="${crop}"/>`;
-      }
-      if (opts.farmed === false) g += `<g transform="translate(0,-4)"><circle r="9" fill="#fff" stroke="#e0604f" stroke-width="2"/><text y="4" text-anchor="middle" font-size="12" font-weight="800" fill="#e0604f">!</text></g>`;
-      return g;
-    }
+    case 'field':
+      return fieldArt(opts.farmed !== false, opts.joins ?? []);
     case 'lumber': {
       let g = `<g transform="translate(-6,0) scale(1.25)">${shadow(12, 3, 8)}
         <rect x="-10" y="-5" width="20" height="13" fill="#9b6b49"/>
@@ -227,7 +351,8 @@ function buildingArt(v: Building, opts: { farmed?: boolean; idle?: boolean }): s
       g += logs(14, 10, 1.05);
       if (l >= 2) g += logs(-16, 14, 0.9);
       if (l >= 3) g += `<g transform="translate(16,-12)"><rect x="-6" y="-2" width="12" height="4" fill="#a87447"/><circle r="5" cy="-5" fill="none" stroke="#9aa3ad" stroke-width="1.6"/></g>`;
-      g += `<g transform="translate(4,16)"><ellipse rx="4" ry="2" fill="#c49a62"/><path d="M-1 -1 L5 -8" stroke="#5a3a20" stroke-width="1.4"/><path d="M4 -9 L8 -7 L6 -5 Z" fill="#9aa3ad"/></g>`;
+      g += `<g transform="translate(4,16)"><ellipse rx="4" ry="2" fill="#c49a62"/><ellipse rx="2.6" ry="1.2" fill="#e0b27c"/><path d="M-1 -1 L5 -8" stroke="#5a3a20" stroke-width="1.4"/><path d="M4 -9 L8 -7 L6 -5 Z" fill="#9aa3ad"/></g>`;
+      if (life) g += person(-6, 18, '#c9553f', true, 1.2);
       return g;
     }
     case 'quarry': {
@@ -236,6 +361,8 @@ function buildingArt(v: Building, opts: { farmed?: boolean; idle?: boolean }): s
       g += boulder(14, 12, 0.8, '#a3a6ab');
       if (l >= 2) g += `<g transform="translate(-14,14)"><rect x="-7" y="-5" width="14" height="7" fill="#8a5a36"/><rect x="-5" y="-8" width="4" height="3" fill="#c9ccd1"/><rect x="0" y="-8" width="4" height="3" fill="#c9ccd1"/><circle cx="-4" cy="3" r="2.2" fill="#333"/><circle cx="4" cy="3" r="2.2" fill="#333"/></g>`;
       if (l >= 3) g += `<g transform="translate(12,-12)" class="shine"><path d="M0 -9 L5 -2 L0 5 L-5 -2 Z" fill="#c9a8ff"/><path d="M0 -9 L5 -2 L0 -1 Z" fill="#efe2ff"/></g>`;
+      g += `<path d="M-14 -10 L-9 -16 L-4 -10" stroke="#7a5130" stroke-width="1.4" fill="none"/>`;
+      if (life) g += person(2, 14, '#f0a830', true, 0.8);
       return g;
     }
     case 'dock': {
@@ -281,16 +408,50 @@ export function menuIcon(t: BuildingType): string {
     <g transform="scale(.8)">${buildingSvg(v)}</g></svg>`;
 }
 
-export const pirateShip = `
-  <g class="ship-shape">
-    <path d="M-16 0 L16 0 L11 9 L-11 9 Z" fill="#3a2a2a"/>
-    <path d="M-16 0 L16 0 L15 2 L-15 2 Z" fill="#5b4040"/>
-    <rect x="-1" y="-24" width="2" height="24" fill="#2a1d1d"/>
-    <path d="M1 -22 Q12 -14 1 -4 Z" fill="#d8dde3"/>
-    <path d="M-1 -22 Q-11 -14 -1 -4 Z" fill="#c4cad1"/>
-    <path d="M1 -26 L9 -24 L1 -22 Z" fill="#222"/>
-    <circle cx="0" cy="-14" r="2.4" fill="#222" opacity=".8"/>
-  </g>`;
+const jolly = (x: number, y: number, k = 1) => `<g transform="translate(${x},${y}) scale(${k})"><path class="flag" d="M0 0 L9 1.5 L8 4.5 L9 7 L0 6 Z" fill="#1d1d22"/><circle cx="4" cy="2.8" r="1.5" fill="#fff"/><path d="M2.4 5 L5.6 3.8 M2.4 3.8 L5.6 5" stroke="#fff" stroke-width=".6"/></g>`;
+const mast = (x: number, top: number, bottom: number) => `<rect x="${x - 0.9}" y="${top}" width="1.8" height="${bottom - top}" fill="#2a1d1d"/>`;
+const squareSail = (x: number, y: number, w: number, h: number, c: string) =>
+  `<path d="M${x - w / 2} ${y} Q${x} ${y + 2} ${x + w / 2} ${y} L${x + w / 2 + 1} ${y + h} Q${x} ${y + h + 3} ${x - w / 2 - 1} ${y + h} Z" fill="${c}"/><path d="M${x - w / 2} ${y} L${x + w / 2} ${y}" stroke="#2a1d1d" stroke-width="1"/>`;
+
+/** Pirate boats, from a wobbly raft to a big galleon. They face right; flip them for the other way. */
+export function pirateShip(kind: PirateShip): string {
+  if (kind === 'raft') return `<g class="ship-shape">
+    ${[-9, -4.5, 0, 4.5, 9].map(x => `<rect x="${x - 2.3}" y="-1" width="4.6" height="7" rx="2.3" fill="#7a5130" stroke="#5a3a20" stroke-width=".6"/>`).join('')}
+    <path d="M-12 2 L12 2" stroke="#c9a66b" stroke-width="1"/>
+    ${mast(0, -20, 0)}
+    <path d="M1 -18 L10 -16 L9 -4 L1 -5 Z" fill="#d8c8a8"/><rect x="4" y="-12" width="3" height="3" fill="#b5a07c"/>
+    ${jolly(-0.5, -27, 0.8)}
+    ${person(-6, 0, '#8a2b2b', false)}</g>`;
+  if (kind === 'sloop') return `<g class="ship-shape">
+    <path d="M-16 0 L17 0 L12 9 L-12 9 Z" fill="#3a2a2a"/>
+    <path d="M-16 0 L17 0 L16 2 L-15 2 Z" fill="#5b4040"/>
+    ${mast(0, -26, 0)}
+    <path d="M1.5 -24 Q13 -14 1.5 -3 Z" fill="#d8dde3"/>
+    <path d="M-1.5 -24 Q-12 -14 -1.5 -3 Z" fill="#c4cad1"/>
+    ${jolly(0, -33)}</g>`;
+  if (kind === 'brig') return `<g class="ship-shape">
+    <path d="M-22 -2 L24 -2 L17 10 L-17 10 Z" fill="#2f2222"/>
+    <path d="M-22 -2 L24 -2 L23 1 L-21 1 Z" fill="#6a4a3a"/>
+    ${[-12, -6, 0, 6, 12].map(x => `<rect x="${x - 1.5}" y="3" width="3" height="2.6" fill="#111"/>`).join('')}
+    ${mast(-8, -30, -2)}${mast(8, -34, -2)}
+    ${squareSail(-8, -27, 12, 9, '#e3ddd0')}${squareSail(-8, -15, 14, 9, '#d8d0c0')}
+    ${squareSail(8, -31, 12, 10, '#e3ddd0')}${squareSail(8, -18, 15, 11, '#d8d0c0')}
+    <path d="M24 -2 L32 -8" stroke="#2a1d1d" stroke-width="1.2"/>
+    ${jolly(8, -42)}</g>`;
+  return `<g class="ship-shape">
+    <path d="M-30 -8 L-20 -8 L-18 -2 L28 -2 L34 -6 L24 12 L-22 12 Z" fill="#3b2420"/>
+    <path d="M-30 -14 L-18 -14 L-18 -2 L-30 -6 Z" fill="#4a2e26"/>
+    <path d="M-30 -8 L-20 -8 L-18 -2 L28 -2 L34 -6" stroke="#d9a73f" stroke-width="1.4" fill="none"/>
+    ${[-14, -7, 0, 7, 14, 21].map(x => `<rect x="${x - 1.5}" y="3" width="3" height="2.8" fill="#111"/><rect x="${x - 1.5}" y="7" width="3" height="2.4" fill="#111"/>`).join('')}
+    <rect x="-28" y="-12" width="3" height="3" fill="#ffd96b" class="glow"/>
+    ${mast(-12, -36, -2)}${mast(4, -42, -2)}${mast(19, -32, -2)}
+    ${squareSail(-12, -33, 13, 10, '#8a2b2b')}${squareSail(-12, -20, 15, 11, '#7a2424')}
+    ${squareSail(4, -39, 14, 11, '#8a2b2b')}${squareSail(4, -25, 17, 13, '#7a2424')}
+    ${squareSail(19, -29, 11, 9, '#8a2b2b')}${squareSail(19, -17, 13, 10, '#7a2424')}
+    <circle cx="4" cy="-20" r="3.2" fill="#1d1d22"/><circle cx="4" cy="-20.5" r="1.5" fill="#e9e3d6"/>
+    <path d="M34 -6 L44 -12" stroke="#2a1d1d" stroke-width="1.4"/>
+    ${jolly(4, -51, 1.2)}</g>`;
+}
 
 /** Start-screen island picture. */
 export const heroIsland = `

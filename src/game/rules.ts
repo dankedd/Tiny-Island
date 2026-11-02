@@ -54,8 +54,29 @@ export function makeIsland(seed: number): Record<string, Terrain> {
       }
     }
   };
-  grow('forest', 4, [3, 6]);
-  grow('rocks', 3, [2, 3]);
+  const growFrom = (kind: Terrain, start: string, n: number) => {
+    let cur = start;
+    for (let i = 0; i < n; i++) {
+      t[cur] = kind;
+      const next = neighbours(...parse(cur)).map(([a, b]) => key(a, b)).filter(k => t[k] === 'grass' && distance(...parse(k)) >= 2);
+      if (!next.length) break;
+      cur = next[Math.floor(rng() * next.length)];
+    }
+  };
+  // Always a small wood and a few rocks close to the town square, so the first camps fit.
+  const ring = Object.keys(t).filter(k => t[k] === 'grass' && distance(...parse(k)) === 2);
+  if (ring.length) {
+    const f = ring[Math.floor(rng() * ring.length)];
+    growFrom('forest', f, 3);
+    const far = ring.filter(k => t[k] === 'grass').sort((a, b) => {
+      const [fq, fr] = parse(f);
+      const da = distance(parse(a)[0] - fq, parse(a)[1] - fr), db = distance(parse(b)[0] - fq, parse(b)[1] - fr);
+      return db - da || (a < b ? -1 : 1);
+    });
+    if (far.length) growFrom('rocks', far[0], 2);
+  }
+  grow('forest', 3, [3, 6]);
+  grow('rocks', 2, [2, 3]);
   return t;
 }
 
@@ -72,7 +93,14 @@ export function newGame(seed = Math.floor(Math.random() * 1e9)): GameState {
     fished: false,
     over: false,
     storms: 0,
+    step: 0,
   };
+}
+
+/** What the player must build first: a lumber camp, then a quarry. Null when building is free. */
+export function startGoal(s: GameState): 'lumber' | 'quarry' | null {
+  const step = s.step ?? 2;
+  return step === 0 ? 'lumber' : step === 1 ? 'quarry' : null;
 }
 
 // ---------- lookups ----------
@@ -127,8 +155,17 @@ export function placeProblem(s: GameState, k: string, t: BuildableType): string 
   if (s.b[k]) return 'Something is already built here.';
   if (ter === 'sea') return 'You cannot build on the sea.';
   if (ter === 'forest' || ter === 'rocks') return `You cannot build on ${ter}. Build next to it.`;
+  const goal = startGoal(s);
+  if (goal && t !== goal && t !== 'road') {
+    return goal === 'lumber'
+      ? 'First build a lumber camp next to a forest, so you get wood.'
+      : 'Now build a quarry next to rocks, so you get stone.';
+  }
   const net = network(s);
-  if (!touchesNetwork(k, net)) return 'Build next to a path that leads to your town square.';
+  const nearFarm = t === 'field' && farmsInReach(s, k, net) > 0;
+  if (!touchesNetwork(k, net) && !nearFarm) {
+    return t === 'field' ? 'Put a field close to a farm, or next to a path.' : 'Build next to a path that leads to your town square.';
+  }
   switch (t) {
     case 'dock': if (ter !== 'beach' || countNb(s, k, 'sea') < 1) return 'A dock must be on the beach, next to the water.'; break;
     case 'lumber': if (countNb(s, k, 'forest') < 1) return 'A lumber camp must be next to a forest.'; break;
@@ -139,6 +176,16 @@ export function placeProblem(s: GameState, k: string, t: BuildableType): string 
   if (t !== 'road' && s.actions >= CONFIG.actionsPerDay) return 'No more building today. Sleep to start a new day.';
   if (!canPay(s, buildCost(t))) return `You need ${costText(buildCost(t))}.`;
   return null;
+}
+
+/** Farms with a path that are close enough to look after a field at `k`. */
+function farmsInReach(s: GameState, k: string, net: Set<string>): number {
+  const [q, r] = parse(k);
+  return Object.keys(s.b).filter(f => {
+    if (s.b[f].t !== 'farm' || !touchesNetwork(f, net)) return false;
+    const [fq, fr] = parse(f);
+    return distance(q - fq, r - fr) <= CONFIG.farmReach;
+  }).length;
 }
 
 /** Points the dock towards the open sea. */
@@ -161,6 +208,8 @@ export function build(s: GameState, k: string, t: BuildableType, rng: Rng = Math
   pay(s, buildCost(t));
   s.b[k] = { t, l: 1 };
   if (t === 'dock') { s.b[k].dir = dockDirection(s, k); s.b[k].boats = []; }
+  const goal = startGoal(s);
+  if (goal && t === goal) s.step = (s.step ?? 0) + 1;
   if (t === 'road') return null;
   return useAction(s, rng);
 }
@@ -227,8 +276,9 @@ export interface Economy {
 
 export function economy(s: GameState): Economy {
   const net = network(s);
-  const connected = new Set(Object.keys(s.b).filter(k => s.b[k].t !== 'road' && touchesNetwork(k, net)));
-  let people = 0, jobs = 0, defence = 0;
+  // Fields are worked from their farm, so they need no path of their own.
+  const connected = new Set(Object.keys(s.b).filter(k => !['road', 'field'].includes(s.b[k].t) && touchesNetwork(k, net)));
+  let people = CONFIG.plazaPeople, jobs = 0, defence = 0;
   for (const k of connected) {
     const v = s.b[k];
     if (v.t === 'house') people += CONFIG.peoplePerHouseLevel * v.l;
@@ -240,7 +290,7 @@ export function economy(s: GameState): Economy {
   // Each farm looks after a few fields close by.
   const farmed = new Set<string>();
   const farms = [...connected].filter(k => s.b[k].t === 'farm');
-  const fields = [...connected].filter(k => s.b[k].t === 'field').sort();
+  const fields = Object.keys(s.b).filter(k => s.b[k].t === 'field').sort();
   for (const f of farms) {
     let room = CONFIG.fieldsPerFarmLevel * s.b[f].l;
     const [fq, fr] = parse(f);
@@ -251,6 +301,7 @@ export function economy(s: GameState): Economy {
       if (distance(q - fq, r - fr) <= CONFIG.farmReach) { farmed.add(fl); room--; }
     }
   }
+  for (const fl of farmed) connected.add(fl);
 
   const perTile: Record<string, Partial<Resources>> = {};
   for (const k of connected) {
@@ -264,7 +315,7 @@ export function economy(s: GameState): Economy {
       for (const b of v.boats ?? []) { y.food! += CONFIG.boats[b].food; if (CONFIG.boats[b].pearls) y.pearls = (y.pearls ?? 0) + CONFIG.boats[b].pearls; }
     }
     // Fewer workers than jobs: everything makes a bit less.
-    for (const n of RES_KEYS) if (y[n]) y[n] = Math.floor(y[n]! * work);
+    for (const n of RES_KEYS) if (y[n]) y[n] = Math.round(y[n]! * work);
     if (Object.values(y).some(n => n)) perTile[k] = y;
   }
   return { people, jobs, work, defence, connected, farmed, perTile };
@@ -281,8 +332,23 @@ export function score(s: GameState): number {
   return e.people * c.perPerson + s.res.pearls * c.perPearl + levels * c.perLevel + boats * c.perBoat;
 }
 
-export const isStormNight = (day: number): boolean => day % CONFIG.stormEvery === 0;
-export const stormPower = (s: GameState): number => CONFIG.stormBase + CONFIG.stormStep * s.storms;
+export const isStormNight = (day: number): boolean =>
+  day >= CONFIG.firstPirateNight && (day - CONFIG.firstPirateNight) % CONFIG.stormEvery === 0;
+/** The pirate fleet for the next pirate night: easy boats first. */
+export const pirateFleet = (s: GameState) => CONFIG.pirates[Math.min(s.storms, CONFIG.pirates.length - 1)];
+export const stormPower = (s: GameState): number => pirateFleet(s).power;
+/** "2 rafts" or "1 brig and 2 sloops". */
+export function fleetText(ships: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const sh of ships) counts.set(sh, (counts.get(sh) ?? 0) + 1);
+  const parts = [...counts].map(([n, c]) => `${c} ${CONFIG.pirateNames[n as keyof typeof CONFIG.pirateNames]}${c > 1 ? 's' : ''}`);
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? '';
+}
+/** The next night with pirates, from today on. */
+export function nextPirateNight(day: number): number | null {
+  for (let d = day; d <= CONFIG.days; d++) if (isStormNight(d)) return d;
+  return null;
+}
 
 export const formatYield = (y: Partial<Resources>): string =>
   RES_KEYS.filter(k => y[k]).map(k => `+${y[k]} ${k}`).join(', ') || 'nothing';
@@ -317,13 +383,17 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
 
   const storm = isStormNight(s.day);
   let stormWon: boolean | undefined;
+  let ships: NightReport['ships'];
   if (storm) {
-    const p = stormPower(s);
+    const fleet = pirateFleet(s);
+    const p = fleet.power;
+    ships = [...fleet.ships];
+    const who = `The Fog Pirates came with ${fleetText(fleet.ships)}`;
     s.storms++;
     stormWon = e.defence >= p;
     if (stormWon) {
       s.res.pearls += 1; s.res.stone += 3;
-      lines.push(`The Fog Pirates came (strength ${p}), but your towers (${e.defence}) chased them away! You found 1 pearl and 3 stone.`);
+      lines.push(`${who} (strength ${p}), but your towers (${e.defence}) chased them away! You found 1 pearl and 3 stone.`);
     } else {
       const loss = p - e.defence;
       const lw = Math.min(s.res.wood, loss);
@@ -337,7 +407,7 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
         hit = ` They also broke your ${BUILDINGS[v.t].name.toLowerCase()}. You can fix it.`;
         v.was = v.t as BuildableType; v.t = 'ruin'; v.l = 1; delete v.boats;
       }
-      lines.push(`The Fog Pirates (strength ${p}) were too strong for your towers (${e.defence}). They took ${lw} wood and ${ls} stone.${hit}`);
+      lines.push(`${who} (strength ${p}). That was too strong for your towers (${e.defence}). They took ${lw} wood and ${ls} stone.${hit}`);
     }
   }
 
@@ -346,10 +416,10 @@ export function nightfall(s: GameState, rng: Rng = Math.random): NightReport {
   s.actions = 0;
   if (s.day >= CONFIG.days) {
     s.over = true;
-    return { title, lines, isStorm: storm, stormWon, yields, gameOver: true };
+    return { title, lines, isStorm: storm, stormWon, ships, yields, gameOver: true };
   }
   s.day++;
-  return { title, lines, isStorm: storm, stormWon, yields, gameOver: false };
+  return { title, lines, isStorm: storm, stormWon, ships, yields, gameOver: false };
 }
 
 /** Go to sleep early, skipping the rest of today's building. */

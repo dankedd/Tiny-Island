@@ -5,17 +5,18 @@ import '@fontsource/nunito/700.css';
 import '@fontsource/nunito/800.css';
 import './styles.css';
 import { CONFIG } from './game/config';
-import { distance, key, neighbours, parse, toPixel as hexToPixel } from './game/hex';
+import { DIRS, distance, key, neighbours, parse, toPixel as hexToPixel } from './game/hex';
 import {
-  boatProblem, build, buildCost, buyBoat, canFish, canPay, economy, fishZone, formatYield, isStormNight,
-  newGame, placeProblem, resolveFish, score, sleep, stormPower, terrainAt, upgrade, upgradeCost, upgradeProblem,
+  boatProblem, build, buildCost, buyBoat, canFish, canPay, economy, fishZone, fleetText, formatYield, isStormNight,
+  network, newGame, nextPirateNight, pirateFleet, placeProblem, resolveFish, score, sleep, startGoal, stormPower,
+  terrainAt, upgrade, upgradeCost, upgradeProblem,
 } from './game/rules';
 import { BUILDINGS, BUILD_MENU, TERRAIN_INFO } from './game/tiles';
 import { GAME_NAME } from './game/brand';
 import type { BoatType, BuildableType, Cost, GameState, NightReport, Resources } from './game/types';
 import { tap } from './feedback';
 import { loadBest, loadGame, saveBest, saveGame } from './storage';
-import { ICONS, S, boatSvg, buildingSvg, heroIsland, hexPoints, menuIcon, pathLayer, pirateShip, terrainLayer } from './art';
+import { ICONS, S, boatSvg, buildingSvg, decorLayer, heroIsland, hexPoints, menuIcon, pathLayer, pirateShip, terrainLayer } from './art';
 import { musicOn, play, soundOn, toggleMusic, toggleSfx, unlockAudio } from './audio';
 
 const root = document.getElementById('app')!;
@@ -80,14 +81,15 @@ function refreshSoundButtons(): void {
 
 function howTo(): void {
   modal(`<h2>How to play</h2><div class="howto"><ul>
+    <li>Start with a lumber camp next to a forest and a quarry next to rocks. They give you wood and stone.</li>
     <li>Pick something from the build menu and tap a green spot. Everything costs wood, stone or food.</li>
     <li>Build paths from your town square. Buildings only work when a path leads to them.</li>
     <li>Houses give you people. People work in farms, lumber camps, quarries and docks.</li>
-    <li>Fields only grow food when a farm is close by. One farm looks after 2 fields, more after an upgrade.</li>
+    <li>Fields only grow food when a farm is close by. One farm looks after 2 fields, more after an upgrade. Fields next to each other join up.</li>
     <li>Put a lumber camp next to a forest and a quarry next to rocks.</li>
     <li>A dock goes on the beach. Buy boats there for more fish!</li>
     <li>You can build ${CONFIG.actionsPerDay} things a day. Then night falls, your island makes things and your people eat.</li>
-    <li>Every second night the Fog Pirates come. Towers keep them away.</li>
+    <li>From night ${CONFIG.firstPirateNight} the Fog Pirates come every ${CONFIG.stormEvery} nights. First in small rafts, later in big ships. Towers keep them away.</li>
     <li>Drag to look around the island. Pinch or use + and − to zoom.</li>
   </ul></div><button class="btn" id="mOk">Let's play!</button>`);
   $('mOk').onclick = () => { play('tap'); closeModal(); };
@@ -106,7 +108,7 @@ function gameScreen(): void {
       <div class="hud"><div class="res" id="res"></div><div class="banner" id="banner"></div></div>
       <div class="board" id="board">
         <svg id="svg" role="img" aria-label="Your island">
-          <g class="waves" id="waves"></g><g id="terrain"></g><g id="paths"></g><g id="overlay"></g><g id="buildings"></g><g id="marks"></g><g id="fx"></g>
+          <g class="waves" id="waves"></g><g id="terrain"></g><g id="decor"></g><g id="paths"></g><g id="overlay"></g><g id="buildings"></g><g id="marks"></g><g id="fx"></g>
         </svg>
         <div class="zoom"><button class="icon-btn" id="zIn" aria-label="Zoom in">+</button><button class="icon-btn" id="zOut" aria-label="Zoom out">−</button><button class="icon-btn" id="zHome" aria-label="Back to the town square">⌂</button></div>
       </div>
@@ -245,7 +247,11 @@ async function doBuild(k: string): Promise<void> {
   const rep = build(G, k, t);
   play('place'); tap();
   justBuilt = k; pending = null; hint = '';
-  if (t !== 'road') { tool = null; sel = null; hint = ''; built = `${BUILDINGS[t].name} built!`; }
+  if (t !== 'road') {
+    tool = null; sel = null; hint = '';
+    const goal = startGoal(G);
+    built = `${BUILDINGS[t].name} built!${goal === 'quarry' ? ' Now build a quarry next to rocks.' : t === 'quarry' && !goal && G.day === 1 ? ' Now you can build anything. Try a farm with fields for food!' : ''}`;
+  }
   void saveGame(G);
   render();
   if (rep) await nightSequence(rep);
@@ -301,13 +307,14 @@ async function nightSequence(rep: NightReport): Promise<void> {
     play('pirates');
     const far = WORLD() * 0.95;
     const near = S * Math.sqrt(3) * 4.2;
-    const angles = [-0.6, 1.4, 2.9].map(a => a + Math.random() * 0.6);
-    fx.insertAdjacentHTML('beforeend', angles.map(a => {
+    const ships = rep.ships ?? ['sloop'];
+    const angles = ships.map((_, i) => -0.6 + i * 2.1 + Math.random() * 0.6);
+    fx.insertAdjacentHTML('beforeend', angles.map((a, i) => {
       const fx1 = Math.cos(a) * far, fy1 = Math.sin(a) * far;
       const nx = Math.cos(a) * near, ny = Math.sin(a) * near;
       const values = rep.stormWon ? `${fx1} ${fy1}; ${nx * 1.4} ${ny * 1.4}; ${fx1 * 1.2} ${fy1 * 1.2}` : `${fx1} ${fy1}; ${nx} ${ny}`;
       const flip = fx1 > 0 ? ' scale(-1,1)' : '';
-      return `<g class="ship"><g><animateTransform attributeName="transform" type="translate" values="${values}" dur="${fast ? 0.5 : 2.2}s" fill="freeze"/><g transform="scale(1.6)${flip}">${pirateShip}</g></g></g>`;
+      return `<g class="ship"><g><animateTransform attributeName="transform" type="translate" values="${values}" dur="${fast ? 0.5 : 2.2}s" fill="freeze"/><g transform="scale(1.6)${flip}">${pirateShip(ships[i])}</g></g></g>`;
     }).join(''));
     if (rep.stormWon) {
       Object.entries(G.b).filter(([, v]) => v.t === 'tower').forEach(([k], i) => {
@@ -321,9 +328,10 @@ async function nightSequence(rep: NightReport): Promise<void> {
 
   busy = false;
   if (rep.gameOver) { play('end'); showEnd(rep.lines, rep.title); return; }
+  const pn = nextPirateNight(G.day);
   const next = isStormNight(G.day)
-    ? `Watch out! The Fog Pirates come tonight (strength ${stormPower(G)}).`
-    : 'Tonight the sea will be calm.';
+    ? `Watch out! The Fog Pirates come tonight with ${fleetText(pirateFleet(G).ships)} (strength ${stormPower(G)}).`
+    : pn ? `Tonight the sea will be calm. Pirates come on night ${pn}.` : 'Tonight the sea will be calm.';
   modal(`<div class="moon" aria-hidden="true">${rep.isStorm ? '🏴‍☠️' : '🌙'}</div><h2>${rep.title}</h2><ul>${rep.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><div class="small">${next}</div><button class="btn" id="mOk">Start day ${G.day}</button>`);
   $('mOk').onclick = () => { play('select'); closeModal(); };
 }
@@ -403,22 +411,32 @@ function render(): void {
   $('dots').innerHTML = Array.from({ length: CONFIG.actionsPerDay }, (_, i) => `<div class="dot${i < G.actions ? ' done' : ''}"></div>`).join('');
   const left = CONFIG.actionsPerDay - G.actions;
   const ban = $('banner');
-  const warn = isStormNight(G.day) ? `🏴‍☠️ Pirates tonight: ${stormPower(G)} vs your ${e.defence}` : `🔨 ${left} ${left === 1 ? 'build' : 'builds'} left today`;
-  ban.className = `banner${isStormNight(G.day) ? ' storm' : ''}`;
+  const goal = startGoal(G);
+  const pn = nextPirateNight(G.day);
+  const warn = goal === 'lumber' ? '🪓 Step 1: lumber camp by a forest'
+    : goal === 'quarry' ? '⛏️ Step 2: quarry by the rocks'
+    : isStormNight(G.day) ? `🏴‍☠️ Tonight: ${fleetText(pirateFleet(G).ships)}, strength ${stormPower(G)} vs your ${e.defence}`
+    : `🔨 ${left} ${left === 1 ? 'build' : 'builds'} left${pn ? ` · pirates night ${pn}` : ''}`;
+  ban.className = `banner${goal ? ' goal' : isStormNight(G.day) ? ' storm' : ''}`;
   ban.innerHTML = `<span>${warn}</span><span class="ban-right">eat ${e.people}🐟 <button class="btn sleep" id="aSleep"${G.over || busy ? ' disabled' : ''}>Sleep 🌙</button></span>`;
   $('aSleep').onclick = () => { play('select'); void doSleep(); };
 
   // Paths and buildings
-  $('paths').innerHTML = pathLayer(G.b, nbKeys, px);
-  const order = Object.keys(G.b).filter(k => G.b[k].t !== 'road').sort((a, b) => px(a).y - px(b).y);
+  $('decor').innerHTML = decorLayer(G.terrain, new Set(Object.keys(G.b)), px);
+  $('paths').innerHTML = pathLayer(G.b, nbKeys, px, network(G));
+  // Flat fields first, then everything else from back to front.
+  const flatFirst = (k: string) => (G.b[k].t === 'field' ? 0 : 1);
+  const order = Object.keys(G.b).filter(k => G.b[k].t !== 'road').sort((a, b) => flatFirst(a) - flatFirst(b) || px(a).y - px(b).y);
   $('buildings').innerHTML = order.map(k => {
     const v = G.b[k];
     const { x, y } = px(k);
     const cls = k === justBuilt ? 'drop' : k === justUpgraded ? 'pulse' : '';
-    const idle = v.t !== 'plaza' && !e.connected.has(k);
+    const idle = v.t !== 'plaza' && v.t !== 'field' && !e.connected.has(k);
+    const [q, r] = parse(k);
+    const joins = v.t === 'field' ? DIRS.map(([dq, dr]) => G.b[key(q + dq, r + dr)]?.t === 'field') : undefined;
     const stars = ['plaza', 'ruin', 'field'].includes(v.t) ? '' : `<g class="stars">${Array.from({ length: v.l }, (_, i) =>
       `<path transform="translate(${(i - (v.l - 1) / 2) * 9},${S * 0.72}) scale(.55)" d="M0 -7 L2 -2 L7 -2 L3 1.5 L4.5 7 L0 4 L-4.5 7 L-3 1.5 L-7 -2 L-2 -2 Z" fill="#ffd34d" stroke="#7a5a10" stroke-width="1.2"/>`).join('')}</g>`;
-    return `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})"><g class="bld ${cls}${idle ? ' idle' : ''}">${buildingSvg(v, { farmed: v.t === 'field' ? e.farmed.has(k) : undefined })}</g>${stars}</g>`;
+    return `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})"><g class="bld ${cls}${idle ? ' idle' : ''}">${buildingSvg(v, { farmed: v.t === 'field' ? e.farmed.has(k) : undefined, joins, life: !idle && !reduceMotion() })}</g>${stars}</g>`;
   }).join('');
   justBuilt = null; justUpgraded = null;
 
@@ -520,7 +538,12 @@ function renderPanel(e: ReturnType<typeof economy>): void {
     return;
   }
 
-  info.innerHTML = hint ? `<span class="warn-text">${esc(hint)}</span>` : built ? `<b>${built}</b> Pick the next thing to build, or tap a building to upgrade it.` : 'Pick something to build, or tap your island to look at it.';
+  const goal = startGoal(G);
+  info.innerHTML = hint ? `<span class="warn-text">${esc(hint)}</span>`
+    : built ? `<b>${built}</b>${goal || G.day === 1 ? '' : ' Pick the next thing to build, or tap a building to upgrade it.'}`
+    : goal === 'lumber' ? 'Welcome! You need <b>wood</b> first. Pick the <b>Lumber camp</b> and put it next to a forest.'
+    : goal === 'quarry' ? 'Now you need <b>stone</b>. Pick the <b>Quarry</b> and put it next to rocks.'
+    : 'Pick something to build, or tap your island to look at it.';
   built = '';
   tools.innerHTML = buildMenu();
   wireBuildMenu();
@@ -536,23 +559,32 @@ function pendingPreview(k: string, t: BuildableType): string {
   tmp.res = { food: 999, wood: 999, stone: 999, pearls: 999 };
   try { build(tmp, k, t); } catch { return ''; }
   const e = economy(tmp);
-  if (t === 'field' && !e.farmed.has(k)) return '<span class="warn-text">No farm close by yet, so it will not grow food.</span>';
+  if (t === 'field' && !e.farmed.has(k)) return '<span class="warn-text">No farm with room close by, so it will not grow food.</span>';
   const y = e.perTile[k];
   return y ? `It will make ${formatYield(y)} a night.` : '';
 }
 
 function buildMenu(): string {
-  return `<div class="buildbar">${BUILD_MENU.map(t => {
+  const g = startGoal(G);
+  const menu = g ? [g, ...BUILD_MENU.filter(t => t !== g)] : BUILD_MENU;
+  return `<div class="buildbar">${menu.map(t => {
     const c = buildCost(t);
-    const ok = canPay(G, c) && (t === 'road' || G.actions < CONFIG.actionsPerDay);
-    return `<button class="bmenu${ok ? '' : ' off'}" data-t="${t}"><span class="bi">${menuIcon(t)}</span><span class="bn">${BUILDINGS[t].name}</span><span class="bc">${costHtml(c)}</span></button>`;
+    const goal = startGoal(G);
+    const ok = canPay(G, c) && (t === 'road' || G.actions < CONFIG.actionsPerDay) && (!goal || t === goal || t === 'road');
+    return `<button class="bmenu${ok ? '' : ' off'}${goal === t ? ' goal' : ''}" data-t="${t}"><span class="bi">${menuIcon(t)}</span><span class="bn">${BUILDINGS[t].name}</span><span class="bc">${costHtml(c)}</span></button>`;
   }).join('')}</div>`;
 }
 function wireBuildMenu(): void {
   $('tools').querySelectorAll<HTMLButtonElement>('.bmenu').forEach(b => {
     b.onclick = () => {
       if (busy) return;
-      tool = b.dataset.t as BuildableType; pending = null; sel = null; hint = '';
+      const t = b.dataset.t as BuildableType;
+      const goal = startGoal(G);
+      if (goal && t !== goal && t !== 'road') {
+        hint = goal === 'lumber' ? 'First build a lumber camp next to a forest, so you get wood.' : 'Now build a quarry next to rocks, so you get stone.';
+        play('error'); render(); return;
+      }
+      tool = t; pending = null; sel = null; hint = '';
       play('select'); tap(); render();
     };
   });

@@ -240,3 +240,21 @@ body { margin: 0; }
 .boat-cost { display: flex; gap: 4px; font-size: .74rem; }
 .app { grid-template-columns: minmax(0, 1fr); }
 .app > *, .panel, #tools, .hud { min-width: 0; }
+
+/* ---------- version 3: start steps, life and details ---------- */
+.shallow { fill: #5cc6c9; opacity: .28; }
+.banner.goal { background: rgba(255,201,74,.18); color: var(--sun); }
+.bmenu.goal { box-shadow: 0 0 0 3px var(--sun), 0 3px 0 rgba(0,0,0,.25); animation: goalpulse 1.2s ease-in-out infinite; }
+@keyframes goalpulse { 50% { transform: translateY(-3px); } }
+.smoke circle { animation: smoke 3s ease-out infinite; opacity: 0; transform-box: fill-box; transform-origin: center; }
+@keyframes smoke { 0% { transform: translate(0,0) scale(.6); opacity: .7; } 100% { transform: translate(4px,-14px) scale(1.8); opacity: 0; } }
+.walk { animation: walk 6s ease-in-out infinite alternate; }
+@keyframes walk { 0% { transform: translateX(-4px); } 45% { transform: translateX(4px); } 50% { transform: translateX(4px) translateY(-.6px); } 100% { transform: translateX(-4px); } }
+.fountain { animation: fountain 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes fountain { 50% { transform: scale(1.8); opacity: .5; } }
+.is-night .smoke { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .smoke circle, .walk, .fountain, .bmenu.goal { animation: none !important; }
+  .smoke circle { opacity: .5; }
+}
+.buildbar { padding: 4px 4px 6px; }

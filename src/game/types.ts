@@ -5,6 +5,7 @@ export type ResourceKey = 'food' | 'wood' | 'stone' | 'pearls';
 export type Resources = Record<ResourceKey, number>;
 export type Cost = Partial<Resources>;
 export type BoatType = 'rowboat' | 'fishingboat' | 'sailboat';
+export type PirateShip = 'raft' | 'sloop' | 'brig' | 'galleon';
 
 export interface Building {
   t: BuildingType;
@@ -28,6 +29,8 @@ export interface GameState {
   fished: boolean;
   over: boolean;
   storms: number;
+  /** Start steps: 0 = build a lumber camp, 1 = build a quarry, 2 (or missing) = free building. */
+  step?: number;
 }
 
 export interface NightReport {
@@ -35,6 +38,7 @@ export interface NightReport {
   lines: string[];
   isStorm: boolean;
   stormWon?: boolean;
+  ships?: PirateShip[];
   yields: { k: string; y: Partial<Resources> }[];
   gameOver: boolean;
 }
